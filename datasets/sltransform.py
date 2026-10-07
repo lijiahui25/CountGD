@@ -1,9 +1,7 @@
 # modified from https://github.com/anhtuan85/Data-Augmentation-for-Object-Detection/blob/master/augmentation.ipynb
 
-import PIL #version 1.2.0
 from PIL import Image #version 6.1.0
 import torch
-import os
 import torchvision.transforms.functional as F
 import numpy as np
 import random
@@ -146,14 +144,6 @@ def rotate(image, boxes, angle):
     new_boxes[:, 3] = torch.clamp(new_boxes[:, 3], 0, h)
     return new_image, new_boxes
 
-# def convert_xywh_to_xyxy(boxes: torch.Tensor):
-#     _boxes = boxes.clone()
-#     box_xy = _boxes[:, :2]
-#     box_wh = _boxes[:, 2:]
-#     box_x1y1 = box_xy - box_wh/2 
-#     box_x2y2 = box_xy + box_wh/2
-#     box_xyxy = torch.cat((box_x1y1, box_x2y2), dim=-1)
-#     return box_xyxy
 
 class Rotate:
     def __init__(self, angle=10) -> None:

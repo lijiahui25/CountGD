@@ -5,7 +5,6 @@ Misc functions, including distributed helpers.
 Mostly copy-paste from torchvision references.
 """
 import os
-import random 
 import subprocess
 import time
 from collections import OrderedDict, defaultdict, deque
@@ -186,8 +185,6 @@ class MetricLogger(object):
     def __str__(self):
         loss_str = []
         for name, meter in self.meters.items():
-            # print(name, str(meter))
-            # import ipdb;ipdb.set_trace()
             if meter.count > 0:
                 loss_str.append(
                     "{}: {}".format(name, str(meter))
@@ -238,7 +235,6 @@ class MetricLogger(object):
         for obj in iterable:
             data_time.update(time.time() - end)
             yield obj
-
             iter_time.update(time.time() - end)
             if i % print_freq == 0 or i == len(iterable) - 1:
                 eta_seconds = iter_time.global_avg * (len(iterable) - i)
@@ -278,12 +274,10 @@ def get_sha():
         branch = _run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'])
     except Exception:
         pass
-    message = f"sha: {sha}, status: {diff}, branch: {branch}"
-    return message
+    return f"sha: {sha}, status: {diff}, branch: {branch}"
 
 
 def collate_fn(batch):
-
     batch = list(zip(*batch))
     batch[0] = nested_tensor_from_tensor_list(batch[0])
     return tuple(batch)
@@ -429,9 +423,7 @@ def _onnx_nested_tensor_from_tensor_list(tensor_list: List[Tensor]) -> NestedTen
 
 
 def setup_for_distributed(is_master):
-    """
-    This function disables printing when not in master process
-    """
+    """This function disables printing when not in master process."""
     import builtins as __builtin__
     builtin_print = __builtin__.print
 
@@ -517,30 +509,34 @@ def init_distributed_mode(args):
     print("End torch.distributed.barrier()")
     setup_for_distributed(args.rank == 0)
 
+
 def setup_distributed(args):
-    if 'WORLD_SIZE' in os.environ and os.environ['WORLD_SIZE'] != '': # 'RANK' in os.environ and 
+    # 单机多卡
+    if 'WORLD_SIZE' in os.environ and os.environ['WORLD_SIZE'] != '':
         local_world_size = int(os.environ['WORLD_SIZE'])
         args.world_size = args.world_size * local_world_size
         args.gpu = args.local_rank = int(os.environ['LOCAL_RANK'])
         args.rank = args.rank * local_world_size + args.local_rank
-        print('world size: {}, rank: {}, local rank: {}'.format(args.world_size, args.rank, args.local_rank))
+        print(f'world size: {args.world_size}, rank: {args.rank}, local rank: {args.local_rank}')
         print(json.dumps(dict(os.environ), indent=2))
-    elif 'SLURM_PROCID' in os.environ:
-        args.rank = int(os.environ['SLURM_PROCID'])
-        args.gpu = args.local_rank = int(os.environ['SLURM_LOCALID'])
-        args.world_size = int(os.environ['SLURM_NTASKS'])
-        node_list = os.environ["SLURM_NODELIST"]
-        addr = subprocess.getoutput(f"scontrol show hostname {node_list} | head -n1")
-        if "MASTER_PORT" not in os.environ:
-            os.environ["MASTER_PORT"] = "23233"
-        if "MASTER_ADDR" not in os.environ:
-            os.environ["MASTER_ADDR"] = addr
-        os.environ["WORLD_SIZE"] = str(args.world_size)
-        os.environ["LOCAL_RANK"] = str(args.local_rank)
-        os.environ["RANK"] = str(args.rank)
-        print('world size: {}, world rank: {}, local rank: {}, device_count: {}'.format(args.world_size, args.rank, args.local_rank, torch.cuda.device_count()))
+    # SLURM 集群
+    # elif 'SLURM_PROCID' in os.environ:
+    #     args.rank = int(os.environ['SLURM_PROCID'])
+    #     args.gpu = args.local_rank = int(os.environ['SLURM_LOCALID'])
+    #     args.world_size = int(os.environ['SLURM_NTASKS'])
+    #     node_list = os.environ["SLURM_NODELIST"]
+    #     addr = subprocess.getoutput(f"scontrol show hostname {node_list} | head -n1")
+    #     if "MASTER_PORT" not in os.environ:
+    #         os.environ["MASTER_PORT"] = "23233"
+    #     if "MASTER_ADDR" not in os.environ:
+    #         os.environ["MASTER_ADDR"] = addr
+    #     os.environ["WORLD_SIZE"] = str(args.world_size)
+    #     os.environ["LOCAL_RANK"] = str(args.local_rank)
+    #     os.environ["RANK"] = str(args.rank)
+    #     print(f'world size: {args.world_size}, world rank: {args.rank}, local rank: {args.local_rank}, device_count: {torch.cuda.device_count()}')
+    # 单机单卡
     else:
-        print('Not using distributed mode')
+        print('Distributed Mode: OFF')
         args.distributed = False
         args.world_size = 1
         args.rank = 0
@@ -550,12 +546,11 @@ def setup_distributed(args):
     args.distributed = True
     torch.cuda.set_device(args.local_rank)
     args.dist_backend = 'nccl'
-    torch.distributed.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
-                                         world_size=args.world_size, rank=args.rank)
+    torch.distributed.init_process_group(backend=args.dist_backend, init_method=args.dist_url, world_size=args.world_size, rank=args.rank)
     torch.distributed.barrier()
     print(f'  == distributed init (rank {args.rank}) done.')
-
     setup_for_distributed(args.rank == 0)
+
 
 @torch.no_grad()
 def accuracy(output, target, topk=(1,)):
@@ -596,7 +591,6 @@ def interpolate(input, size=None, scale_factor=None, mode="nearest", align_corne
         return torchvision.ops.misc.interpolate(input, size, scale_factor, mode, align_corners)
 
 
-
 class color_sys():
     def __init__(self, num_colors) -> None:
         self.num_colors = num_colors
@@ -611,11 +605,13 @@ class color_sys():
     def __call__(self, idx):
         return self.colors[idx]
 
+
 def inverse_sigmoid(x, eps=1e-3):
     x = x.clamp(min=0, max=1)
     x1 = x.clamp(min=eps)
     x2 = (1 - x).clamp(min=eps)
     return torch.log(x1/x2)
+
 
 def clean_state_dict(state_dict):
     new_state_dict = OrderedDict()

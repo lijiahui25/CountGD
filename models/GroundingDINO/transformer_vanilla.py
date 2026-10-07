@@ -17,16 +17,11 @@ Copy-paste from torch.nn.Transformer with modifications:
 from typing import Optional
 
 import torch
-import torch.nn.functional as F
 from torch import Tensor, nn
 
 from .utils import (
-    MLP,
     _get_activation_fn,
     _get_clones,
-    gen_encoder_output_proposals,
-    gen_sineembed_for_position,
-    sigmoid_focal_loss,
 )
 
 
@@ -114,7 +109,6 @@ class TransformerEncoderLayer(nn.Module):
 
         src2 = self.self_attn(q, k, value=src, attn_mask=src_mask)[0]
 
-        # src2 = self.self_attn(q, k, value=src, attn_mask=src_mask, key_padding_mask=src_key_padding_mask)[0]
         src = src + self.dropout1(src2)
         src = self.norm1(src)
         src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))

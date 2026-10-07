@@ -1,16 +1,12 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
-import functools
-import logging
 import os
 import sys
+import logging
 import colorlog
+import functools
 
 
-# so that calling setup_logger multiple times won't add many handlers
 @functools.lru_cache()
-def setup_logger(
-    output=None, distributed_rank=0, *, color=True, name="imagenet", abbrev_name=None
-):
+def setup_logger(output=None, distributed_rank=0, *, name="imagenet"):
     """
     Initialize the detectron2 logger and set its verbosity level to "INFO".
 
@@ -25,31 +21,32 @@ def setup_logger(
     """
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
-    formatter = colorlog.ColoredFormatter(
-            "%(log_color)s%(levelname)-8s%(reset)s %(log_color)s%(asctime)s | %(blue)s%(message)s",
+    logger.propagate = False
+
+    color_formatter = colorlog.ColoredFormatter(
+        "%(log_color)s%(levelname)-8s%(reset)s %(log_color)s%(asctime)s | %(blue)s%(message)s",
         datefmt=None,
         reset=True,
         log_colors={
-            'DEBUG':    'cyan', 
+            'DEBUG':    'cyan',
             'INFO':     'green',
             'WARNING':  'yellow',
             'ERROR':    'red',
             'CRITICAL': 'red,bg_white'
         }
     )
-    logger.propagate = False
-
-    if abbrev_name is None:
-        abbrev_name = name
-
-    # stdout logging: master only
+    # 终端输出
     if distributed_rank == 0:
         ch = logging.StreamHandler(stream=sys.stdout)
         ch.setLevel(logging.DEBUG)
-        ch.setFormatter(formatter)
+        ch.setFormatter(color_formatter)
         logger.addHandler(ch)
 
-    # file logging: all workers
+    plain_formatter = logging.Formatter(
+        "%(levelname)-8s %(asctime)s | %(message)s",
+        datefmt=None
+    )
+    # 文件输出
     if output is not None:
         if output.endswith(".txt") or output.endswith(".log"):
             filename = output
@@ -61,7 +58,7 @@ def setup_logger(
 
         fh = logging.StreamHandler(_cached_log_stream(filename))
         fh.setLevel(logging.DEBUG)
-        fh.setFormatter(formatter)
+        fh.setFormatter(plain_formatter)
         logger.addHandler(fh)
 
     return logger

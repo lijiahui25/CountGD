@@ -31,13 +31,11 @@ class CocoGroundingEvaluator(object):
         assert isinstance(iou_types, (list, tuple))
         coco_gt = copy.deepcopy(coco_gt)
         self.coco_gt = coco_gt
-
         self.iou_types = iou_types
         self.coco_eval = {}
         for iou_type in iou_types:
             self.coco_eval[iou_type] = COCOeval(coco_gt, iouType=iou_type)
             self.coco_eval[iou_type].useCats = useCats
-
         self.img_ids = []
         self.eval_imgs = {k: [] for k in iou_types}
         self.useCats = useCats
@@ -221,10 +219,6 @@ def evaluate(self):
     Run per image evaluation on given images and store results (a list of dict) in self.evalImgs
     :return: None
     """
-    # tic = time.time()
-    # print('Running per image evaluation...')
-
-    # import pdb;pdb.set_trace()
     p = self.params
     # add backward compatibility if useSegm is specified in params
     if p.useSegm is not None:
@@ -261,8 +255,7 @@ def evaluate(self):
     # this is NOT in the pycocotools code, but could be done outside
     evalImgs = np.asarray(evalImgs).reshape(len(catIds), len(p.areaRng), len(p.imgIds))
     self._paramsEval = copy.deepcopy(self.params)
-    # toc = time.time()
-    # print('DONE (t={:0.2f}s).'.format(toc-tic))
+
     return p.imgIds, evalImgs
 
 

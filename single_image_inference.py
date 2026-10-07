@@ -117,7 +117,7 @@ def build_model_and_transforms(args):
         if k not in args_vars:
             setattr(args, k, v)
         else:
-            raise ValueError("Key {} can used by args only".format(k))
+            raise ValueError(f"Key {k} can used by args only")
 
     device = torch.device(args.device)
     # fix the seed for reproducibility

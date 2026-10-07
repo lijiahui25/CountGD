@@ -19,12 +19,11 @@ Backbone modules.
 from typing import Dict, List
 
 import torch
-import torch.nn.functional as F
 import torchvision
+import torch.nn.functional as F
 from torch import nn
 from torchvision.models._utils import IntermediateLayerGetter
-
-from groundingdino.util.misc import NestedTensor, clean_state_dict, is_main_process
+from groundingdino.util.misc import NestedTensor, is_main_process
 
 from .position_encoding import build_position_encoding
 from .swin_transformer import build_swin_transformer
@@ -91,16 +90,9 @@ class BackboneBase(nn.Module):
         return_layers = {}
         for idx, layer_index in enumerate(return_interm_indices):
             return_layers.update(
-                {"layer{}".format(5 - len(return_interm_indices) + idx): "{}".format(layer_index)}
+                {f"layer{5 - len(return_interm_indices) + idx}": f"{layer_index}"}
             )
-
-        # if len:
-        #     if use_stage1_feature:
-        #         return_layers = {"layer1": "0", "layer2": "1", "layer3": "2", "layer4": "3"}
-        #     else:
-        #         return_layers = {"layer2": "0", "layer3": "1", "layer4": "2"}
-        # else:
-        #     return_layers = {'layer4': "0"}
+        
         self.body = IntermediateLayerGetter(backbone, return_layers=return_layers)
         self.num_channels = num_channels
 
@@ -112,7 +104,7 @@ class BackboneBase(nn.Module):
             assert m is not None
             mask = F.interpolate(m[None].float(), size=x.shape[-2:]).to(torch.bool)[0]
             out[name] = NestedTensor(x, mask)
-        # import ipdb; ipdb.set_trace()
+        
         return out
 
 
@@ -134,7 +126,7 @@ class Backbone(BackboneBase):
                 norm_layer=batch_norm,
             )
         else:
-            raise NotImplementedError("Why you can get here with name {}".format(name))
+            raise NotImplementedError(f"Why you can get here with name {name}")
         # num_channels = 512 if name in ('resnet18', 'resnet34') else 2048
         assert name not in ("resnet18", "resnet34"), "Only resnet50 and resnet101 are available."
         assert return_interm_indices in [[0, 1, 2, 3], [1, 2, 3], [3]]
@@ -148,13 +140,12 @@ class Joiner(nn.Sequential):
         super().__init__(backbone, position_embedding)
 
     def forward(self, tensor_list: NestedTensor):
-        xs = self[0](tensor_list)
+        xs = self[0](tensor_list)  # SwinTransformer
         out: List[NestedTensor] = []
         pos = []
-        for name, x in xs.items():
-            out.append(x)
-            # position encoding
-            pos.append(self[1](x).to(x.tensors.dtype))
+        for _, x in xs.items():
+            out.append(x)  # 某层的图像特征
+            pos.append(self[1](x).to(x.tensors.dtype))  # 对应的位置编码
 
         return out, pos
 
@@ -170,13 +161,12 @@ def build_backbone(args):
         - use_checkpoint: for swin only for now
 
     """
-    position_embedding = build_position_encoding(args)
+    position_embedding = build_position_encoding(args)  # 位置编码
     train_backbone = True
-    if not train_backbone:
-        raise ValueError("Please set lr_backbone > 0")
+    # if not train_backbone:
+    #     raise ValueError("Please set lr_backbone > 0")
     return_interm_indices = args.return_interm_indices
     assert return_interm_indices in [[0, 1, 2, 3], [1, 2, 3], [3]]
-    args.backbone_freeze_keywords
     use_checkpoint = getattr(args, "use_checkpoint", False)
 
     if args.backbone in ["resnet50", "resnet101"]:
@@ -191,7 +181,7 @@ def build_backbone(args):
     elif args.backbone in [
         "swin_T_224_1k",
         "swin_B_224_22k",
-        "swin_B_384_22k",
+        "swin_B_384_22k",  # config
         "swin_L_224_22k",
         "swin_L_384_22k",
     ]:
@@ -203,10 +193,9 @@ def build_backbone(args):
             dilation=False,
             use_checkpoint=use_checkpoint,
         )
-
         bb_num_channels = backbone.num_features[4 - len(return_interm_indices) :]
     else:
-        raise NotImplementedError("Unknown backbone {}".format(args.backbone))
+        raise NotImplementedError(f"Unknown backbone {args.backbone}")
 
     assert len(bb_num_channels) == len(
         return_interm_indices
@@ -216,6 +205,6 @@ def build_backbone(args):
     model.num_channels = bb_num_channels
     assert isinstance(
         bb_num_channels, List
-    ), "bb_num_channels is expected to be a List but {}".format(type(bb_num_channels))
-    # import ipdb; ipdb.set_trace()
+    ), f"bb_num_channels is expected to be a List but {type(bb_num_channels)}"
+    
     return model

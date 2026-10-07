@@ -7,18 +7,15 @@
 Modified from COCO evaluator
 '''
 
-import os, sys
-from textwrap import wrap
+import os
 import torch
 import numpy as np
-import cv2
 import datetime
 
 import matplotlib.pyplot as plt
 from matplotlib.collections import PatchCollection
 from matplotlib.patches import Polygon
-from pycocotools import mask as maskUtils
-from matplotlib import transforms
+
 
 def renorm(img: torch.FloatTensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) \
         -> torch.FloatTensor:
@@ -40,6 +37,7 @@ def renorm(img: torch.FloatTensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224
         img_res = img_perm * std + mean
         return img_res.permute(0,3,1,2)
 
+
 class ColorMap():
     def __init__(self, basergb=[255,255,0]):
         self.basergb = np.array(basergb)
@@ -56,7 +54,7 @@ class ColorMap():
 
 
 class COCOVisualizer():
-    def __init__(self) -> None:
+    def __init__(self):
         pass
 
     def visualize(self, img, tgt, caption=None, dpi=120, savedir=None, show_in_console=True):
@@ -80,7 +78,7 @@ class COCOVisualizer():
                 savename = '{}/{}-{}.png'.format(savedir, int(tgt['image_id']), str(datetime.datetime.now()).replace(' ', '-'))
             else:
                 savename = '{}/{}-{}-{}.png'.format(savedir, caption, int(tgt['image_id']), str(datetime.datetime.now()).replace(' ', '-'))
-            print("savename: {}".format(savename))
+            print(f"savename: {savename}")
             os.makedirs(os.path.dirname(savename), exist_ok=True)
             plt.savefig(savename)
         plt.close()
@@ -115,7 +113,6 @@ class COCOVisualizer():
         p = PatchCollection(polygons, facecolor='none', edgecolors=color, linewidths=2)
         ax.add_collection(p)
 
-
         if 'box_label' in tgt:
             assert len(tgt['box_label']) == numbox, f"{len(tgt['box_label'])} = {numbox}, "
             for idx, bl in enumerate(tgt['box_label']):
@@ -126,5 +123,3 @@ class COCOVisualizer():
 
         if 'caption' in tgt:
             ax.set_title(tgt['caption'], wrap=True)
-
-

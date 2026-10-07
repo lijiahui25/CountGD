@@ -1,14 +1,14 @@
-from torchvision.datasets.vision import VisionDataset
-import os.path
-from typing import Callable, Optional
+import os
 import json
-from PIL import Image
-import torch
 import random
-import os, sys
-sys.path.append(os.path.dirname(sys.path[0]))
+from typing import Callable, Optional
+
+import torch
+from PIL import Image
+from torchvision.datasets.vision import VisionDataset
 
 import datasets.transforms as T
+
 
 class ODVGDataset(VisionDataset):
     """
@@ -33,7 +33,7 @@ class ODVGDataset(VisionDataset):
         transform: Optional[Callable] = None,
         target_transform: Optional[Callable] = None,
         transforms: Optional[Callable] = None,
-    ) -> None:
+    ):
         super().__init__(root, transforms, transform, target_transform)
         self.root = root
         self.dataset_mode = "OD" if label_map_anno else "VG"
@@ -49,7 +49,7 @@ class ODVGDataset(VisionDataset):
         self.label_index = set(self.label_map.keys())
 
     def _load_metas(self, anno):
-        with  open(anno, 'r')as f:
+        with open(anno, 'r') as f:
             self.metas = [json.loads(line) for line in f]
 
     def get_dataset_info(self):
@@ -71,26 +71,23 @@ class ODVGDataset(VisionDataset):
             anno = meta["detection"]
             instances = [obj for obj in anno["instances"]]
             boxes = [obj["bbox"] for obj in instances]
-            # generate vg_labels
-            # pos bbox labels
             ori_classes = [str(obj["label"]) for obj in instances]
+            # 正标签
             pos_labels = set(ori_classes)
-            # neg bbox labels 
+            # 负标签
             neg_labels = self.label_index.difference(pos_labels)
-             
             vg_labels = list(pos_labels)
             num_to_add = min(len(neg_labels), self.max_labels-len(pos_labels))
             if num_to_add > 0:
                 vg_labels.extend(random.sample(neg_labels, num_to_add))
             
-            # shuffle
+            # 打乱顺序
             for i in range(len(vg_labels)-1, 0, -1):
                 j = random.randint(0, i)
                 vg_labels[i], vg_labels[j] = vg_labels[j], vg_labels[i]
 
             caption_list = [self.label_map[lb] for lb in vg_labels]
             caption_dict = {item:index for index, item in enumerate(caption_list)}
-
             caption = ' . '.join(caption_list) + ' .'
             classes = [caption_dict[self.label_map[str(obj["label"])]] for obj in instances]
             boxes = torch.as_tensor(boxes, dtype=torch.float32).reshape(-1, 4)
@@ -123,21 +120,17 @@ class ODVGDataset(VisionDataset):
         if len(target['labels']) > 0:
             assert target['labels'][0] == target['labels_uncropped'][0]
             print('asserted')
-        # size, cap_list, caption, bboxes, labels
 
-
-        if self.transforms is not None:
+        if self.transforms:
             image, target = self.transforms(image, target)
 
         return image, target
-    
 
-    def __len__(self) -> int:
+    def __len__(self):
         return len(self.metas)
 
 
 def make_coco_transforms(image_set, fix_size=False, strong_aug=False, args=None):
-
     normalize = T.Compose([
         T.ToTensor(),
         T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
@@ -163,14 +156,6 @@ def make_coco_transforms(image_set, fix_size=False, strong_aug=False, args=None)
         max_size = int(max_size*data_aug_scale_overlap)
         scales2_resize = [int(i*data_aug_scale_overlap) for i in scales2_resize]
         scales2_crop = [int(i*data_aug_scale_overlap) for i in scales2_crop]
-
-    # datadict_for_print = {
-    #     'scales': scales,
-    #     'max_size': max_size,
-    #     'scales2_resize': scales2_resize,
-    #     'scales2_crop': scales2_crop
-    # }
-    # print("data_aug_params:", json.dumps(datadict_for_print, indent=2))
 
     if image_set == 'train':
         if fix_size:
@@ -216,7 +201,6 @@ def make_coco_transforms(image_set, fix_size=False, strong_aug=False, args=None)
         ])
 
     if image_set in ['val', 'eval_debug', 'train_reg', 'test']:
-
         if os.environ.get("GFLOPS_DEBUG_SHILONG", False) == 'INFO':
             print("Under debug mode for flops calculation only!!!!!!!!!!!!!!!!")
             return T.Compose([
@@ -231,30 +215,12 @@ def make_coco_transforms(image_set, fix_size=False, strong_aug=False, args=None)
 
     raise ValueError(f'unknown {image_set}')
 
+
 def build_odvg(image_set, args, datasetinfo):
     img_folder = datasetinfo["root"]
     ann_file = datasetinfo["anno"]
     label_map = datasetinfo["label_map"] if "label_map" in datasetinfo else None
-    try:
-        strong_aug = args.strong_aug
-    except:
-        strong_aug = False
-    print(img_folder, ann_file, label_map)
-    dataset = ODVGDataset(img_folder, ann_file, label_map, max_labels=args.max_labels,
-            transforms=make_coco_transforms(image_set, fix_size=args.fix_size, strong_aug=strong_aug, args=args), 
-    )
-    return dataset
 
-
-if __name__=="__main__":
-    dataset_vg = ODVGDataset("path/GRIT-20M/data/","path/GRIT-20M/anno/grit_odvg_10k.jsonl",)
-    print(len(dataset_vg))
-    data = dataset_vg[random.randint(0, 100)] 
-    print(data)
-    dataset_od = ODVGDataset("pathl/V3Det/",
-        "path/V3Det/annotations/v3det_2023_v1_all_odvg.jsonl",
-        "path/V3Det/annotations/v3det_label_map.json",
+    return ODVGDataset(img_folder, ann_file, label_map, args.max_labels,
+        transforms=make_coco_transforms(image_set, args.fix_size, False, args)
     )
-    print(len(dataset_od))
-    data = dataset_od[random.randint(0, 100)] 
-    print(data)

@@ -15,9 +15,7 @@
 from collections import OrderedDict, Counter, defaultdict
 import json
 import os
-from posixpath import join
 import sys
-
 
 sys.path.append(os.path.dirname(sys.path[0]))
 
@@ -34,7 +32,7 @@ import time
 
 from util.slconfig import SLConfig
 
-from typing import Any, Callable, List, Optional, Union
+from typing import Any, Callable, List, Union
 from numbers import Number
 
 Handle = Callable[[List[Any], List[Any]], Union[typing.Counter[str], Number]]

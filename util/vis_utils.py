@@ -53,7 +53,7 @@ def plot_dual_img(img, boxes, labels, idxs, probs=None):
     # plot with class
     class_colors = [_color_getter(i) for i in labels]
     if probs is not None:
-        brands = ["{},{:.2f}".format(j,k) for j,k in zip(labels, probs)]
+        brands = [f"{j},{k:.2f}" for j, k in zip(labels, probs)]
     else:
         brands = labels
     img_classcolor = add_box_to_img(img, boxes, class_colors, brands=brands)

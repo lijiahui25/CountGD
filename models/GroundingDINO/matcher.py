@@ -14,8 +14,7 @@
 # Copyright (c) 2020 SenseTime. All Rights Reserved.
 # ------------------------------------------------------------------------
 
-
-import torch, os
+import torch
 from torch import nn
 from scipy.optimize import linear_sum_assignment
 
@@ -29,7 +28,7 @@ class HungarianMatcher(nn.Module):
     while the others are un-matched (and thus treated as non-objects).
     """
 
-    def __init__(self, cost_class: float = 1, cost_bbox: float = 1, cost_giou: float = 1, focal_alpha = 0.25):
+    def __init__(self, cost_class: float=1, cost_bbox: float=1, cost_giou: float=1, focal_alpha=0.25):
         """Creates the matcher
         Params:
             cost_class: This is the relative weight of the classification error in the matching cost
@@ -40,8 +39,7 @@ class HungarianMatcher(nn.Module):
         self.cost_class = cost_class
         self.cost_bbox = cost_bbox
         self.cost_giou = cost_giou
-        assert cost_class != 0 or cost_bbox != 0 or cost_giou != 0, "all costs cant be 0"
-
+        assert cost_class != 0 or cost_bbox != 0 or cost_giou != 0, "all costs can't be 0"
         self.focal_alpha = focal_alpha
 
     @torch.no_grad()
@@ -94,7 +92,6 @@ class HungarianMatcher(nn.Module):
         else:
             cost_class=torch.zeros_like(cost_bbox)
         # Compute the L1 cost between boxes
-        
 
         # Compute the giou cost betwen boxes
         cost_giou = -generalized_box_iou(box_cxcywh_to_xyxy(out_bbox), box_cxcywh_to_xyxy(tgt_bbox))
@@ -139,7 +136,6 @@ class SimpleMinsumMatcher(nn.Module):
         self.cost_bbox = cost_bbox
         self.cost_giou = cost_giou
         assert cost_class != 0 or cost_bbox != 0 or cost_giou != 0, "all costs cant be 0"
-
         self.focal_alpha = focal_alpha
 
     @torch.no_grad()
@@ -202,16 +198,15 @@ class SimpleMinsumMatcher(nn.Module):
 
 
 def build_matcher(args):
-    assert args.matcher_type in ['HungarianMatcher', 'SimpleMinsumMatcher'], "Unknown args.matcher_type: {}".format(args.matcher_type)
+    assert args.matcher_type in ['HungarianMatcher', 'SimpleMinsumMatcher'], f"Unknown args.matcher_type: {args.matcher_type}"
     if args.matcher_type == 'HungarianMatcher':
         return HungarianMatcher(
-            cost_class=args.set_cost_class, cost_bbox=args.set_cost_bbox, cost_giou=args.set_cost_giou,
-            focal_alpha=args.focal_alpha
+            args.set_cost_class, args.set_cost_bbox, args.set_cost_giou, args.focal_alpha
         )
-    elif args.matcher_type == 'SimpleMinsumMatcher':
-        return SimpleMinsumMatcher(
-            cost_class=args.set_cost_class, cost_bbox=args.set_cost_bbox, cost_giou=args.set_cost_giou,
-            focal_alpha=args.focal_alpha
-        )    
+    # elif args.matcher_type == 'SimpleMinsumMatcher':
+    #     return SimpleMinsumMatcher(
+    #         cost_class=args.set_cost_class, cost_bbox=args.set_cost_bbox, cost_giou=args.set_cost_giou,
+    #         focal_alpha=args.focal_alpha
+    #     )
     else:
-        raise NotImplementedError("Unknown args.matcher_type: {}".format(args.matcher_type))
+        raise NotImplementedError(f"Unknown args.matcher_type: {args.matcher_type}")

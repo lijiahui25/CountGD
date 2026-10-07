@@ -107,8 +107,6 @@ matcher_type = 'HungarianMatcher'
 decoder_module_seq = ['sa', 'ca', 'ffn']
 nms_iou_threshold = -1
 dec_pred_class_embed_share = True
-
-
 match_unstable_error = True
 use_ema = False
 ema_decay = 0.9997

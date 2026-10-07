@@ -1,6 +1,5 @@
 import PIL #version 1.2.0
 import torch
-import os
 import torchvision.transforms.functional as F
 import numpy as np
 import random
@@ -24,6 +23,8 @@ def intersect(boxes1, boxes2):
                        boxes2[:, :2].unsqueeze(0).expand(n1, n2, 2))
     inter = torch.clamp(max_xy - min_xy , min=0)  # (n1, n2, 2)
     return inter[:, :, 0] * inter[:, :, 1]  #(n1, n2)
+
+
 def find_IoU(boxes1, boxes2):
     '''
         Find IoU between every boxes set of boxes 

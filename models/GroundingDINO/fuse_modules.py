@@ -155,8 +155,6 @@ class BiMultiHeadAttention(nn.Module):
         Returns:
             _type_: _description_
         """
-        # if os.environ.get('IPDB_SHILONG_DEBUG', None) == 'INFO':
-        #     import ipdb; ipdb.set_trace()
         bsz, tgt_len, _ = v.size()
 
         query_states = self.v_proj(v) * self.scale
@@ -248,7 +246,6 @@ class BiMultiHeadAttention(nn.Module):
         return attn_output_v, attn_output_l
 
 
-# Bi-Direction MHA (text->image, image->text)
 class BiAttentionBlock(nn.Module):
     def __init__(
         self,
@@ -261,7 +258,7 @@ class BiAttentionBlock(nn.Module):
         init_values=1e-4,
         cfg=None,
     ):
-        """
+        """ 双向多头注意力 (text->image, image->text)
         Inputs:
             embed_dim - Dimensionality of input and attention feature vectors
             hidden_dim - Dimensionality of hidden layer in feed-forward network
@@ -293,5 +290,3 @@ class BiAttentionBlock(nn.Module):
         v = v + self.drop_path(self.gamma_v * delta_v)
         l = l + self.drop_path(self.gamma_l * delta_l)
         return v, l
-
-    # def forward(self, v:List[torch.Tensor], l, attention_mask_v=None, attention_mask_l=None)

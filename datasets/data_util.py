@@ -1,15 +1,16 @@
 import os
-import os.path as osp
-import shutil
 import time
+import shutil
 import datetime
 
 import torch
 
 from util.slconfig import SLConfig
 
+
 class Error(OSError):
     pass
+
 
 def slcopytree(src, dst, symlinks=False, ignore=None, copy_function=shutil.copyfile,
              ignore_dangling_symlinks=False):
@@ -100,6 +101,7 @@ def slcopytree(src, dst, symlinks=False, ignore=None, copy_function=shutil.copyf
         raise Error(errors)
     return dst
 
+
 def check_and_copy(src_path, tgt_path):
     if os.path.exists(tgt_path):
         return None
@@ -165,6 +167,3 @@ def preparing_dataset(pathdict, image_set, args):
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
         print('Data copy time {}'.format(total_time_str))
     return copyfilelist
-
-
-    

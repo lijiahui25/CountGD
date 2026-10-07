@@ -3,11 +3,8 @@ from torch import nn
 
 
 class PositionalEncodingsFixed(nn.Module):
-
     def __init__(self, emb_dim, temperature=10000):
-
-        super(PositionalEncodingsFixed, self).__init__()
-
+        super().__init__()
         self.emb_dim = emb_dim
         self.temperature = temperature
 
@@ -16,11 +13,9 @@ class PositionalEncodingsFixed(nn.Module):
         temp = self.temperature ** (2 * (temp.div(2, rounding_mode='floor')) / self.emb_dim)
 
         enc = (~mask).cumsum(dim).float().unsqueeze(-1) / temp
-        enc = torch.stack([
+        return torch.stack([
             enc[..., 0::2].sin(), enc[..., 1::2].cos()
         ], dim=-1).flatten(-2)
-
-        return enc
 
     def forward(self, bs, h, w, device):
         mask = torch.zeros(bs, h, w, dtype=torch.bool, requires_grad=False, device=device)

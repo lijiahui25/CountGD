@@ -58,9 +58,9 @@ class Transformer(nn.Module):
         enc_n_points=4,
         dec_n_points=4,
         # init query
-        learnable_tgt_init=False,
+        learnable_tgt_init=True,
         # two stage
-        two_stage_type="no",  # ['no', 'standard', 'early', 'combine', 'enceachlayer', 'enclayer1']
+        two_stage_type="no",  # ['no', 'standard']
         embed_init_tgt=False,
         # for text
         use_text_enhancer=False,
@@ -73,28 +73,28 @@ class Transformer(nn.Module):
         fusion_droppath=0.0,
     ):
         super().__init__()
-        self.num_feature_levels = num_feature_levels
+        self.num_queries = num_queries
         self.num_encoder_layers = num_encoder_layers
         self.num_unicoder_layers = num_unicoder_layers
         self.num_decoder_layers = num_decoder_layers
-        self.num_queries = num_queries
+        self.num_feature_levels = num_feature_levels
         assert query_dim == 4
 
-        # choose encoder layer type
+        # 使用 Deformable Transformer 做图像特征增强
         encoder_layer = DeformableTransformerEncoderLayer(
             d_model, dim_feedforward, dropout, activation, num_feature_levels, nhead, enc_n_points
         )
-
+        # 使用 Transformer 做文本特征增强
         if use_text_enhancer:
             text_enhance_layer = TransformerEncoderLayer(
                 d_model=d_model,
                 nhead=nhead // 2,
                 dim_feedforward=dim_feedforward // 2,
-                dropout=text_dropout,
+                dropout=text_dropout
             )
         else:
             text_enhance_layer = None
-
+        # 图文双向特征交互
         if use_fusion_layer:
             feature_fusion_layer = BiAttentionBlock(
                 v_dim=d_model,
@@ -102,13 +102,11 @@ class Transformer(nn.Module):
                 embed_dim=dim_feedforward // 2,
                 num_heads=nhead // 2,
                 dropout=fusion_dropout,
-                drop_path=fusion_droppath,
+                drop_path=fusion_droppath
             )
         else:
             feature_fusion_layer = None
-
-        encoder_norm = nn.LayerNorm(d_model) if normalize_before else None
-        assert encoder_norm is None
+        # 特征增强器
         self.encoder = TransformerEncoder(
             encoder_layer,
             num_encoder_layers,
@@ -145,23 +143,20 @@ class Transformer(nn.Module):
 
         self.d_model = d_model
         self.nhead = nhead
-        self.dec_layers = num_decoder_layers
         self.num_queries = num_queries  # useful for single stage model only
+        self.dec_layers = num_decoder_layers
         self.num_patterns = num_patterns
         if not isinstance(num_patterns, int):
-            Warning("num_patterns should be int but {}".format(type(num_patterns)))
+            Warning(f"num_patterns should be int but {type(num_patterns)}")
             self.num_patterns = 0
 
         if num_feature_levels > 1:
-            if self.num_encoder_layers > 0:
-                self.level_embed = nn.Parameter(torch.Tensor(num_feature_levels, d_model))
-            else:
-                self.level_embed = None
+            self.level_embed = nn.Parameter(torch.Tensor(num_feature_levels, d_model)) if self.num_encoder_layers > 0 else None
 
         self.learnable_tgt_init = learnable_tgt_init
         assert learnable_tgt_init, "why not learnable_tgt_init"
         self.embed_init_tgt = embed_init_tgt
-        if (two_stage_type != "no" and embed_init_tgt) or (two_stage_type == "no"):
+        if (two_stage_type != "no" and embed_init_tgt) or two_stage_type == "no":
             self.tgt_embed = nn.Embedding(self.num_queries, d_model)
             nn.init.normal_(self.tgt_embed.weight.data)
         else:
@@ -169,9 +164,7 @@ class Transformer(nn.Module):
 
         # for two stage
         self.two_stage_type = two_stage_type
-        assert two_stage_type in ["no", "standard"], "unknown param {} of two_stage_type".format(
-            two_stage_type
-        )
+        assert two_stage_type in ["no", "standard"], f"unknown param {two_stage_type} of two_stage_type"
         if two_stage_type == "standard":
             # anchor selection at the output of encoder
             self.enc_output = nn.Linear(d_model, d_model)
@@ -216,23 +209,21 @@ class Transformer(nn.Module):
             - refpoint_embed: [bs, num_dn, 4]. None in infer
             - pos_embeds: List of multi pos embeds [bs, ci, hi, wi]
             - tgt: [bs, num_dn, d_model]. None in infer
-
         """
-        # prepare input for encoder
+        # 展开多尺度特征
         src_flatten = []
         mask_flatten = []
         lvl_pos_embed_flatten = []
         spatial_shapes = []
         for lvl, (src, mask, pos_embed) in enumerate(zip(srcs, masks, pos_embeds)):
-            bs, c, h, w = src.shape
+            bs, _, h, w = src.shape
             spatial_shape = (h, w)
             spatial_shapes.append(spatial_shape)
-
-            src = src.flatten(2).transpose(1, 2)  # bs, hw, c
-            mask = mask.flatten(1)  # bs, hw
-            pos_embed = pos_embed.flatten(2).transpose(1, 2)  # bs, hw, c
-            if self.num_feature_levels > 1 and self.level_embed is not None:
-                lvl_pos_embed = pos_embed + self.level_embed[lvl].view(1, 1, -1)
+            src = src.flatten(2).transpose(1, 2)  # (B, HW, D)
+            mask = mask.flatten(1)  # (B, HW)
+            pos_embed = pos_embed.flatten(2).transpose(1, 2)  # (B, HW, D)
+            if self.num_feature_levels > 1 and self.level_embed:
+                lvl_pos_embed = pos_embed + self.level_embed[lvl].view(1, 1, -1)  # (B, HW, D)
             else:
                 lvl_pos_embed = pos_embed
             lvl_pos_embed_flatten.append(lvl_pos_embed)
@@ -243,19 +234,13 @@ class Transformer(nn.Module):
         lvl_pos_embed_flatten = torch.cat(lvl_pos_embed_flatten, 1)  # bs, \sum{hxw}, c
         spatial_shapes = torch.as_tensor(
             spatial_shapes, dtype=torch.long, device=src_flatten.device
-        )
+        )  # (N_lvl, 2)
         level_start_index = torch.cat(
             (spatial_shapes.new_zeros((1,)), spatial_shapes.prod(1).cumsum(0)[:-1])
-        )
-        valid_ratios = torch.stack([self.get_valid_ratio(m) for m in masks], 1)
+        )  # (N_lvl,) 每个层级的特征在序列中的起始位置
+        valid_ratios = torch.stack([self.get_valid_ratio(m) for m in masks], 1)  # (B, N_lvl, 2)
 
-        # two stage
-        enc_topk_proposals = enc_refpoint_embed = None
-
-        #########################################################
         # Begin Encoder
-        #########################################################
-        
         memory, memory_text = self.encoder(
             src_flatten,
             pos=lvl_pos_embed_flatten,
@@ -264,80 +249,63 @@ class Transformer(nn.Module):
             valid_ratios=valid_ratios,
             key_padding_mask=mask_flatten,
             memory_text=text_dict["encoded_text"],
-            text_attention_mask=~text_dict["text_token_mask"],
-            # we ~ the mask . False means use the token; True means pad the token
+            text_attention_mask=~text_dict["text_token_mask"],  # 1 表示填充
             position_ids=text_dict["position_ids"],
             text_self_attention_masks=text_dict["text_self_attention_masks"],
         )
         
-        #########################################################
-        # End Encoder
-        # - memory: bs, \sum{hw}, c
-        # - mask_flatten: bs, \sum{hw}
-        # - lvl_pos_embed_flatten: bs, \sum{hw}, c
-        # - enc_intermediate_output: None or (nenc+1, bs, nq, c) or (nenc, bs, nq, c)
-        # - enc_intermediate_refpoints: None or (nenc+1, bs, nq, c) or (nenc, bs, nq, c)
-        #########################################################
-        text_dict["encoded_text"] = memory_text
-        # if os.environ.get("SHILONG_AMP_INFNAN_DEBUG") == '1':
-        #     if memory.isnan().any() | memory.isinf().any():
-        #         import ipdb; ipdb.set_trace()
+        text_dict["encoded_text"] = memory_text  # 更新增强后的文本特征
 
-
-        if self.two_stage_type == "standard":  #把encoder的输出作为proposal
+        if self.two_stage_type == "standard":
+            # 把 encoder 输出的每个 token 位置转换成一个候选框，供后续选 top-k 作为初始 query
             output_memory, output_proposals = gen_encoder_output_proposals(
                 memory, mask_flatten, spatial_shapes
-            )
-            output_memory = self.enc_output_norm(self.enc_output(output_memory))
-
-            if text_dict is not None:
+            )  # output_memory: (B, S, D), output_proposals: (B, S, 4) unsigmoid  (cx, cy, w, h)
+            output_memory = self.enc_output_norm(self.enc_output(output_memory))  # 线性层投影 + 层归一化
+            # 这里使用的 enc_out_class_embed 在外层的 groundingdino 中赋值，是一个 ContrastiveEmbed
+            if text_dict:
                 enc_outputs_class_unselected = self.enc_out_class_embed(output_memory, text_dict)
             else:
                 enc_outputs_class_unselected = self.enc_out_class_embed(output_memory)
-
+            # 找每个图像位置的最高匹配分数
             topk_logits = enc_outputs_class_unselected.max(-1)[0]
+            topk = self.num_queries
+            topk_proposals = torch.topk(topk_logits, topk, dim=1)[1]  # (B, num_queries) 索引不是坐标
+            # enc_out_bbox_embed 在外层的 groundingdino 中赋值，是一个 MLP
+            # 预测初始框的修正量，和初始框相加得到预测框
             enc_outputs_coord_unselected = (
                 self.enc_out_bbox_embed(output_memory) + output_proposals
-            )  # (bs, \sum{hw}, 4) unsigmoid
-            topk = self.num_queries
-
-            topk_proposals = torch.topk(topk_logits, topk, dim=1)[1]  # bs, nq
-
-            # gather boxes
+            )  # (B, sum(HW), 4) unsigmoid
+            # 根据索引获取预测框
             refpoint_embed_undetach = torch.gather(
                 enc_outputs_coord_unselected, 1, topk_proposals.unsqueeze(-1).repeat(1, 1, 4)
             )  # unsigmoid
             refpoint_embed_ = refpoint_embed_undetach.detach()
+            # 根据索引取未修正的初始框
             init_box_proposal = torch.gather(
                 output_proposals, 1, topk_proposals.unsqueeze(-1).repeat(1, 1, 4)
-            ).sigmoid()  # sigmoid
-
-            # gather tgt
+            ).sigmoid()
+            # 取出每个预测框对应的图像特征
             tgt_undetach = torch.gather(
                 output_memory, 1, topk_proposals.unsqueeze(-1).repeat(1, 1, self.d_model)
             )
             if self.embed_init_tgt:
-                tgt_ = (
-                    self.tgt_embed.weight[:, None, :].repeat(1, bs, 1).transpose(0, 1)
-                )  # nq, bs, d_model
+                # 解码器的可学习的 query
+                tgt_ = self.tgt_embed.weight[:, None, :].repeat(1, bs, 1).transpose(0, 1)  # nq, bs, d_model
             else:
                 tgt_ = tgt_undetach.detach()
 
-            if refpoint_embed is not None:
+            if refpoint_embed:
                 refpoint_embed = torch.cat([refpoint_embed, refpoint_embed_], dim=1)
                 tgt = torch.cat([tgt, tgt_], dim=1)
             else:
                 refpoint_embed, tgt = refpoint_embed_, tgt_
 
         elif self.two_stage_type == "no":
-            tgt_ = (
-                self.tgt_embed.weight[:, None, :].repeat(1, bs, 1).transpose(0, 1)
-            )  # nq, bs, d_model
-            refpoint_embed_ = (
-                self.refpoint_embed.weight[:, None, :].repeat(1, bs, 1).transpose(0, 1)
-            )  # nq, bs, 4
+            tgt_ = self.tgt_embed.weight[:, None, :].repeat(1, bs, 1).transpose(0, 1)  # nq, bs, d_model
+            refpoint_embed_ = self.refpoint_embed.weight[:, None, :].repeat(1, bs, 1).transpose(0, 1)  # nq, bs, 4
 
-            if refpoint_embed is not None:
+            if refpoint_embed:
                 refpoint_embed = torch.cat([refpoint_embed, refpoint_embed_], dim=1)
                 tgt = torch.cat([tgt, tgt_], dim=1)
             else:
@@ -352,22 +320,10 @@ class Transformer(nn.Module):
                 tgt = tgt_embed + tgt_pat
 
             init_box_proposal = refpoint_embed_.sigmoid()
-
         else:
-            raise NotImplementedError("unknown two_stage_type {}".format(self.two_stage_type))
-        #########################################################
-        # End preparing tgt
-        # - tgt: bs, NQ, d_model
-        # - refpoint_embed(unsigmoid): bs, NQ, d_model
-        #########################################################
+            raise NotImplementedError(f"unknown two_stage_type {self.two_stage_type}")
 
-        #########################################################
         # Begin Decoder
-        #########################################################
-
-        #memory  torch.Size([2, 16320, 256])
-
-        # import pdb;pdb.set_trace()
         hs, references = self.decoder(
             tgt=tgt.transpose(0, 1),
             memory=memory.transpose(0, 1),
@@ -382,32 +338,15 @@ class Transformer(nn.Module):
             text_attention_mask=~text_dict["text_token_mask"],
             # we ~ the mask . False means use the token; True means pad the token
         )
-        #########################################################
-        # End Decoder
-        # hs: n_dec, bs, nq, d_model
-        # references: n_dec+1, bs, nq, query_dim
-        #########################################################
 
-        #########################################################
         # Begin postprocess
-        #########################################################
         if self.two_stage_type == "standard":
             hs_enc = tgt_undetach.unsqueeze(0)
             ref_enc = refpoint_embed_undetach.sigmoid().unsqueeze(0)
         else:
             hs_enc = ref_enc = None
-        #########################################################
-        # End postprocess
-        # hs_enc: (n_enc+1, bs, nq, d_model) or (1, bs, nq, d_model) or (n_enc, bs, nq, d_model) or None
-        # ref_enc: (n_enc+1, bs, nq, query_dim) or (1, bs, nq, query_dim) or (n_enc, bs, nq, d_model) or None
-        #########################################################
 
         return hs, references, hs_enc, ref_enc, init_box_proposal
-        # hs: (n_dec, bs, nq, d_model)
-        # references: sigmoid coordinates. (n_dec+1, bs, bq, 4)
-        # hs_enc: (n_enc+1, bs, nq, d_model) or (1, bs, nq, d_model) or None
-        # ref_enc: sigmoid coordinates. \
-        #           (n_enc+1, bs, nq, query_dim) or (1, bs, nq, query_dim) or None
 
 
 class TransformerEncoder(nn.Module):
@@ -423,41 +362,24 @@ class TransformerEncoder(nn.Module):
         use_checkpoint=False,
         use_transformer_ckpt=False,
     ):
-        """_summary_
-
-        Args:
-            encoder_layer (_type_): _description_
-            num_layers (_type_): _description_
-            norm (_type_, optional): _description_. Defaults to None.
-            d_model (int, optional): _description_. Defaults to 256.
-            num_queries (int, optional): _description_. Defaults to 300.
-            enc_layer_share (bool, optional): _description_. Defaults to False.
-
-        """
         super().__init__()
-        # prepare layers
-        self.layers = []
-        self.text_layers = []
-        self.fusion_layers = []
         if num_layers > 0:
             self.layers = _get_clones(encoder_layer, num_layers, layer_share=enc_layer_share)
-
-            if text_enhance_layer is not None:
+            if text_enhance_layer:
                 self.text_layers = _get_clones(
                     text_enhance_layer, num_layers, layer_share=enc_layer_share
                 )
-            if feature_fusion_layer is not None:
+            if feature_fusion_layer:
                 self.fusion_layers = _get_clones(
                     feature_fusion_layer, num_layers, layer_share=enc_layer_share
                 )
         else:
             self.layers = []
             del encoder_layer
-
-            if text_enhance_layer is not None:
+            if text_enhance_layer:
                 self.text_layers = []
                 del text_enhance_layer
-            if feature_fusion_layer is not None:
+            if feature_fusion_layer:
                 self.fusion_layers = []
                 del feature_fusion_layer
 
@@ -465,24 +387,27 @@ class TransformerEncoder(nn.Module):
         self.num_queries = num_queries
         self.num_layers = num_layers
         self.d_model = d_model
-
         self.use_checkpoint = use_checkpoint
         self.use_transformer_ckpt = use_transformer_ckpt
 
     @staticmethod
     def get_reference_points(spatial_shapes, valid_ratios, device):
         reference_points_list = []
+        # 遍历每个图像尺度
         for lvl, (H_, W_) in enumerate(spatial_shapes):
-
+            # 生成参考点坐标，范围在0~1之间，表示相对于特征图的归一化坐标
+            # ref_y, ref_x: [H_, W_] 
             ref_y, ref_x = torch.meshgrid(
                 torch.linspace(0.5, H_ - 0.5, H_, dtype=torch.float32, device=device),
                 torch.linspace(0.5, W_ - 0.5, W_, dtype=torch.float32, device=device),
             )
-            ref_y = ref_y.reshape(-1)[None] / (valid_ratios[:, None, lvl, 1] * H_)
+            # 除以 valid_ratios, 有效区域坐标被拉伸回 [0, 1] 范围, 与原始坐标对齐
+            ref_y = ref_y.reshape(-1)[None] / (valid_ratios[:, None, lvl, 1] * H_)  # (H_, W_) -> (B, H_*W_)
             ref_x = ref_x.reshape(-1)[None] / (valid_ratios[:, None, lvl, 0] * W_)
-            ref = torch.stack((ref_x, ref_y), -1)
+            ref = torch.stack((ref_x, ref_y), -1)  # (B, H_*W_, 2)
             reference_points_list.append(ref)
-        reference_points = torch.cat(reference_points_list, 1)
+        reference_points = torch.cat(reference_points_list, 1)  # (B, sum(H_*W_), 2)
+        # 映射到 padding 后的完整特征图坐标系。因为 Deformable Attention 采样时是在完整特征图上采样的，需要知道每个参考点在完整特征图中的位置。
         reference_points = reference_points[:, :, None] * valid_ratios[:, None]
         return reference_points
 
@@ -496,11 +421,11 @@ class TransformerEncoder(nn.Module):
         valid_ratios: Tensor,
         key_padding_mask: Tensor,
         # for texts
-        memory_text: Tensor = None,
-        text_attention_mask: Tensor = None,
-        pos_text: Tensor = None,
-        text_self_attention_masks: Tensor = None,
-        position_ids: Tensor = None,
+        memory_text: Tensor=None,
+        text_attention_mask: Tensor=None,
+        pos_text: Tensor=None,
+        text_self_attention_masks: Tensor=None,
+        position_ids: Tensor=None,
     ):
         """
         Input:
@@ -510,12 +435,10 @@ class TransformerEncoder(nn.Module):
             - level_start_index: [num_level] start point of level in sum(hi*wi).
             - valid_ratios: [bs, num_level, 2]
             - key_padding_mask: [bs, sum(hi*wi)]
-
             - memory_text: bs, n_text, 256
             - text_attention_mask: bs, n_text
                 False for no padding; True for padding
             - pos_text: bs, n_text, 256
-
             - position_ids: bs, n_text
         Intermedia:
             - reference_points: [bs, sum(hi*wi), num_level, 2]
@@ -533,26 +456,15 @@ class TransformerEncoder(nn.Module):
 
         if self.text_layers:
             # generate pos_text
-            bs, n_text, text_dim = memory_text.shape
-            if pos_text is None and position_ids is None:
-                pos_text = (
-                    torch.arange(n_text, device=memory_text.device)
-                    .float()
-                    .unsqueeze(0)
-                    .unsqueeze(-1)
-                    .repeat(bs, 1, 1)
-                )
-                pos_text = get_sine_pos_embed(pos_text, num_pos_feats=256, exchange_xy=False)
-            if position_ids is not None:
-                pos_text = get_sine_pos_embed(
-                    position_ids[..., None], num_pos_feats=256, exchange_xy=False
-                )
+            # bs, n_text, _ = memory_text.shape
+            # if pos_text is None and position_ids is None:
+            #     pos_text = torch.arange(n_text, device=memory_text.device).float().unsqueeze(0).unsqueeze(-1).repeat(bs, 1, 1)
+            #     pos_text = get_sine_pos_embed(pos_text, 256, exchange_xy=False)
+            if position_ids:
+                pos_text = get_sine_pos_embed(position_ids[..., None], 256, exchange_xy=False)
 
         # main process
         for layer_id, layer in enumerate(self.layers):
-            # if output.isnan().any() or memory_text.isnan().any():
-            #     if os.environ.get('IPDB_SHILONG_DEBUG', None) == 'INFO':
-            #         import ipdb; ipdb.set_trace()
             if self.fusion_layers:
                 if self.use_checkpoint:
                     output, memory_text = checkpoint.checkpoint(
@@ -575,7 +487,7 @@ class TransformerEncoder(nn.Module):
                     src=memory_text.transpose(0, 1),
                     src_mask=~text_self_attention_masks,  # note we use ~ for mask here
                     src_key_padding_mask=text_attention_mask,
-                    pos=(pos_text.transpose(0, 1) if pos_text is not None else None),
+                    pos=(pos_text.transpose(0, 1) if pos_text else None),
                 ).transpose(0, 1)
 
             # main process
@@ -608,7 +520,7 @@ class TransformerDecoder(nn.Module):
         decoder_layer,
         num_layers,
         norm=None,
-        return_intermediate=False,
+        return_intermediate=True,
         d_model=256,
         query_dim=4,
         num_feature_levels=1,
@@ -623,18 +535,14 @@ class TransformerDecoder(nn.Module):
         self.return_intermediate = return_intermediate
         assert return_intermediate, "support return_intermediate only"
         self.query_dim = query_dim
-        assert query_dim in [2, 4], "query_dim should be 2/4 but {}".format(query_dim)
+        assert query_dim in [2, 4], f"query_dim should be 2/4 but {query_dim}"
         self.num_feature_levels = num_feature_levels
-
         self.ref_point_head = MLP(query_dim // 2 * d_model, d_model, d_model, 2)
         self.query_pos_sine_scale = None
-
         self.query_scale = None
         self.bbox_embed = None
         self.class_embed = None
-
         self.d_model = d_model
-
         self.ref_anchor_head = None
 
     def forward(
@@ -665,14 +573,11 @@ class TransformerDecoder(nn.Module):
         """
         output = tgt
 
-        intermediate = []
+        intermediate = []  # 保存每一层的输出，norm 后的结果
         reference_points = refpoints_unsigmoid.sigmoid()
-        ref_points = [reference_points]
-
-        
+        ref_points = [reference_points]  # 保存每一层的参考点，sigmoid 后的结果
 
         for layer_id, layer in enumerate(self.layers):
-
             if reference_points.shape[-1] == 4:
                 reference_points_input = (
                     reference_points[:, :, None]
@@ -687,11 +592,7 @@ class TransformerDecoder(nn.Module):
 
             # conditional query
             raw_query_pos = self.ref_point_head(query_sine_embed)  # nq, bs, 256
-            pos_scale = self.query_scale(output) if self.query_scale is not None else 1
-            query_pos = pos_scale * raw_query_pos
-            # if os.environ.get("SHILONG_AMP_INFNAN_DEBUG") == '1':
-            #     if query_pos.isnan().any() | query_pos.isinf().any():
-            #         import ipdb; ipdb.set_trace()
+            query_pos = raw_query_pos
 
             # main process
             output = layer(
@@ -718,27 +619,17 @@ class TransformerDecoder(nn.Module):
                     print(f"num_nan {num_nan}, num_inf {num_inf}")
                 except Exception as e:
                     print(e)
-                    # if os.environ.get("SHILONG_AMP_INFNAN_DEBUG") == '1':
-                    #     import ipdb; ipdb.set_trace()
 
-            # iter update
-            if self.bbox_embed is not None:
-                # box_holder = self.bbox_embed(output)
-                # box_holder[..., :self.query_dim] += inverse_sigmoid(reference_points)
-                # new_reference_points = box_holder[..., :self.query_dim].sigmoid()
-
+            # self.bbox_embed 在外层的 groundingdino 中赋值，是 MLP
+            if self.bbox_embed:
                 reference_before_sigmoid = inverse_sigmoid(reference_points)
                 delta_unsig = self.bbox_embed[layer_id](output)
                 outputs_unsig = delta_unsig + reference_before_sigmoid
                 new_reference_points = outputs_unsig.sigmoid()
-
                 reference_points = new_reference_points.detach()
-                # if layer_id != self.num_layers - 1:
                 ref_points.append(new_reference_points)
 
             intermediate.append(self.norm(output))
-
-        # import pdb;pdb.set_trace()
 
         return [
             [itm_out.transpose(0, 1) for itm_out in intermediate],
@@ -792,7 +683,6 @@ class DeformableTransformerEncoderLayer(nn.Module):
         self, src, pos, reference_points, spatial_shapes, level_start_index, key_padding_mask=None
     ):
         # self attention
-        # import ipdb; ipdb.set_trace()
         src2 = self.self_attn(
             query=self.with_pos_embed(src, pos),
             reference_points=reference_points,
@@ -941,23 +831,23 @@ class DeformableTransformerDecoderLayer(nn.Module):
 def build_transformer(args):
     return Transformer(
         d_model=args.hidden_dim,
-        dropout=args.dropout,
         nhead=args.nheads,
         num_queries=args.num_queries,
-        dim_feedforward=args.dim_feedforward,
         num_encoder_layers=args.enc_layers,
         num_decoder_layers=args.dec_layers,
+        dim_feedforward=args.dim_feedforward,
+        dropout=args.dropout,
+        activation=args.transformer_activation,
         normalize_before=args.pre_norm,
         return_intermediate_dec=True,
         query_dim=args.query_dim,
-        activation=args.transformer_activation,
         num_patterns=args.num_patterns,
         num_feature_levels=args.num_feature_levels,
         enc_n_points=args.enc_n_points,
         dec_n_points=args.dec_n_points,
         learnable_tgt_init=True,
         # two stage
-        two_stage_type=args.two_stage_type,  # ['no', 'standard', 'early']
+        two_stage_type=args.two_stage_type,  # ['no', 'standard']
         embed_init_tgt=args.embed_init_tgt,
         use_text_enhancer=args.use_text_enhancer,
         use_fusion_layer=args.use_fusion_layer,

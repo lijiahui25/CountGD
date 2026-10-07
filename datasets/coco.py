@@ -4,30 +4,17 @@ COCO dataset which returns image_id for evaluation.
 
 Mostly copy-paste from https://github.com/pytorch/vision/blob/13b35ff/references/detection/coco_utils.py
 """
-if __name__=="__main__":
-    # for debug only
-    import os, sys
-    sys.path.append(os.path.dirname(sys.path[0]))
-from torchvision.datasets.vision import VisionDataset
-
-import json
-from pathlib import Path
-import random
 import os
-from typing import Any, Callable, List, Optional, Tuple
-
-from PIL import Image
+import random
 
 import torch
-import torch.utils.data
 import torchvision
+from PIL import Image
 from pycocotools import mask as coco_mask
 
-from datasets.data_util import preparing_dataset
 import datasets.transforms as T
+from datasets.data_util import preparing_dataset
 from util.box_ops import box_cxcywh_to_xyxy, box_iou
-
-__all__ = ['build']
 
 
 class label2compat():
@@ -325,8 +312,8 @@ dataset_hook_register = {
 
 
 class CocoDetection(torchvision.datasets.CocoDetection):
-    def __init__(self, img_folder, ann_file, transforms, return_masks, aux_target_hacks=None):
-        super(CocoDetection, self).__init__(img_folder, ann_file)
+    def __init__(self, img_folder, ann_file, transforms, return_masks=False, aux_target_hacks=None):
+        super().__init__(img_folder, ann_file)
         self._transforms = transforms
         self.prepare = ConvertCocoPolysToMask(return_masks)
         self.aux_target_hacks = aux_target_hacks
@@ -358,12 +345,11 @@ class CocoDetection(torchvision.datasets.CocoDetection):
                     Final type: cx,cy,w,h. normalized data. 
         """
         try:
-            img, target = super(CocoDetection, self).__getitem__(idx)
-            
+            img, target = super().__getitem__(idx)
         except:
-            print("Error idx: {}".format(idx))
+            print(f"Error idx: {idx}")
             idx += 1
-            img, target = super(CocoDetection, self).__getitem__(idx)
+            img, target = super().__getitem__(idx)
         
         image_id = self.ids[idx]
         target = {'image_id': image_id, 'annotations': target}
@@ -377,12 +363,11 @@ class CocoDetection(torchvision.datasets.CocoDetection):
         target['boxes'] = target['boxes'][:-3]
         target['labels'] = target['labels'][:-3]
         
-        
-        if self._transforms is not None:
+        if self._transforms:
             img, target = self._transforms(img, target)
 
         # convert to needed format
-        if self.aux_target_hacks is not None:
+        if self.aux_target_hacks:
             for hack_runner in self.aux_target_hacks:
                 target, img = hack_runner(target, img=img)
 
@@ -472,7 +457,6 @@ class ConvertCocoPolysToMask(object):
 
 
 def make_coco_transforms(image_set, fix_size=False, strong_aug=False, args=None):
-
     normalize = T.Compose([
         T.ToTensor(),
         T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
@@ -498,14 +482,6 @@ def make_coco_transforms(image_set, fix_size=False, strong_aug=False, args=None)
         max_size = int(max_size*data_aug_scale_overlap)
         scales2_resize = [int(i*data_aug_scale_overlap) for i in scales2_resize]
         scales2_crop = [int(i*data_aug_scale_overlap) for i in scales2_crop]
-
-    datadict_for_print = {
-        'scales': scales,
-        'max_size': max_size,
-        'scales2_resize': scales2_resize,
-        'scales2_crop': scales2_crop
-    }
-    # print("data_aug_params:", json.dumps(datadict_for_print, indent=2))
 
     if image_set == 'train':
         if fix_size:
@@ -551,21 +527,11 @@ def make_coco_transforms(image_set, fix_size=False, strong_aug=False, args=None)
             normalize,
         ])
 
-    if image_set in ['val', 'eval_debug', 'train_reg', 'test']:
-
-        if os.environ.get("GFLOPS_DEBUG_SHILONG", False) == 'INFO':
-            print("Under debug mode for flops calculation only!!!!!!!!!!!!!!!!")
-            return T.Compose([
-                T.ResizeDebug((1280, 800)),
-                normalize,
-            ])   
-
+    if image_set in ['val', 'test']:
         return T.Compose([
             T.RandomResize([max(scales)], max_size=max_size),
             normalize,
         ])
-
-
 
     raise ValueError(f'unknown {image_set}')
 
@@ -632,29 +598,7 @@ def build(image_set, args, datasetinfo):
     img_folder = datasetinfo["root"]
     ann_file = datasetinfo["anno"]
 
-    # copy to local path
-    if os.environ.get('DATA_COPY_SHILONG') == 'INFO':
-        preparing_dataset(dict(img_folder=img_folder, ann_file=ann_file), image_set, args)
-
-    try:
-        strong_aug = args.strong_aug
-    except:
-        strong_aug = False
-    print(img_folder, ann_file)
-    dataset = CocoDetection(img_folder, ann_file, 
-            transforms=make_coco_transforms(image_set, fix_size=args.fix_size, strong_aug=strong_aug, args=args), 
-            return_masks=args.masks,
-            aux_target_hacks=None,
-        )
-    return dataset
-
-
-if __name__ == "__main__":
-    # Objects365 Val example
-    dataset_o365 = CocoDetection(
-            '/path/Objects365/train/',
-            "/path/Objects365/slannos/anno_preprocess_train_v2.json",
-            transforms=None,
-            return_masks=False,
-        )
-    print('len(dataset_o365):', len(dataset_o365))
+    return CocoDetection(img_folder, ann_file, 
+        make_coco_transforms(image_set, args.fix_size, False, args), 
+        args.masks
+    )

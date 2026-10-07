@@ -6,24 +6,17 @@
 # ------------------------------------------------------------------------
 
 import torch
-import torch.nn.functional as F
-import torch.utils.checkpoint as checkpoint
-from torch import Tensor, nn
-from torchvision.ops.boxes import nms
-from transformers import BertConfig, BertModel, BertPreTrainedModel
+from torch import nn
 from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAttentions
 
 
 class BertModelWarper(nn.Module):
     def __init__(self, bert_model):
         super().__init__()
-        # self.bert = bert_modelc
-
         self.config = bert_model.config
         self.embeddings = bert_model.embeddings
         self.encoder = bert_model.encoder
         self.pooler = bert_model.pooler
-
         self.get_extended_attention_mask = bert_model.get_extended_attention_mask
         self.invert_attention_mask = bert_model.invert_attention_mask
         self.get_head_mask = bert_model.get_head_mask
@@ -82,7 +75,7 @@ class BertModelWarper(nn.Module):
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
         elif input_ids is not None:
-            input_shape = input_ids.size()
+            input_shape = input_ids.size()  # (B, L)
             batch_size, seq_length = input_shape
         elif inputs_embeds is not None:
             input_shape = inputs_embeds.size()[:-1]
@@ -90,7 +83,7 @@ class BertModelWarper(nn.Module):
         else:
             raise ValueError("You have to specify either input_ids or inputs_embeds")
 
-        device = input_ids.device if input_ids is not None else inputs_embeds.device
+        device = input_ids.device if input_ids else inputs_embeds.device
 
         # past_key_values_length
         past_key_values_length = (
@@ -120,8 +113,6 @@ class BertModelWarper(nn.Module):
             encoder_extended_attention_mask = self.invert_attention_mask(encoder_attention_mask)
         else:
             encoder_extended_attention_mask = None
-        # if os.environ.get('IPDB_SHILONG_DEBUG', None) == 'INFO':
-        #     import ipdb; ipdb.set_trace()
 
         # Prepare head mask if needed
         # 1.0 in head_mask indicate we keep the head
@@ -151,7 +142,7 @@ class BertModelWarper(nn.Module):
             return_dict=return_dict,
         )
         sequence_output = encoder_outputs[0]
-        pooled_output = self.pooler(sequence_output) if self.pooler is not None else None
+        pooled_output = self.pooler(sequence_output) if self.pooler else None
 
         if not return_dict:
             return (sequence_output, pooled_output) + encoder_outputs[1:]
@@ -214,60 +205,48 @@ def generate_masks_with_special_tokens(tokenized, special_tokens_list, tokenizer
 
         previous_col = col
 
-    # # padding mask
-    # padding_mask = tokenized['attention_mask']
-    # attention_mask = attention_mask & padding_mask.unsqueeze(1).bool() & padding_mask.unsqueeze(2).bool()
-
     return attention_mask, position_ids.to(torch.long)
 
 
-def generate_masks_with_special_tokens_and_transfer_map(tokenized, special_tokens_list, tokenizer):
+def generate_masks_with_special_tokens_and_transfer_map(tokenized, special_tokens_list):
     """Generate attention mask between each pair of special tokens
     Args:
         input_ids (torch.Tensor): input ids. Shape: [bs, num_token]
         special_tokens_mask (list): special tokens mask.
     Returns:
-        torch.Tensor: attention mask between each special tokens.
+        attention_mask: 同一 segment 内的 token 互相可见，不同 segment 之间不可见
+        position_ids: 每个 segment 内从 0 重新计数
     """
     input_ids = tokenized["input_ids"]
     bs, num_token = input_ids.shape
     # special_tokens_mask: bs, num_token. 1 for special tokens. 0 for normal tokens
     special_tokens_mask = torch.zeros((bs, num_token), device=input_ids.device).bool()
     for special_token in special_tokens_list:
-        special_tokens_mask |= input_ids == special_token
+        special_tokens_mask |= input_ids == special_token  # 将特殊 token 位置的 mask 设置为 1
 
-    # idxs: each row is a list of indices of special tokens
+    # 返回所有特殊 token 的 (batch_idx, token_idx) 坐标对
     idxs = torch.nonzero(special_tokens_mask)
 
-    # generate attention mask and positional ids
+    # 初始化 attention_mask
     attention_mask = (
         torch.eye(num_token, device=input_ids.device).bool().unsqueeze(0).repeat(bs, 1, 1)
-    )
+    )  # (bs, len, len)  不同 token 之间是否可见
+    # 初始化 position_ids
     position_ids = torch.zeros((bs, num_token), device=input_ids.device)
-    cate_to_token_mask_list = [[] for _ in range(bs)]
     previous_col = 0
+    # 遍历每个特殊 token
     for i in range(idxs.shape[0]):
         row, col = idxs[i]
-        if (col == 0) or (col == num_token - 1):
+        # 开头或结尾仅自身可见
+        if col == 0 or col == num_token - 1:
             attention_mask[row, col, col] = True
             position_ids[row, col] = 0
         else:
+            # 每个 segmentation 内部可见，并且从 0 开始重新编号
             attention_mask[row, previous_col + 1 : col + 1, previous_col + 1 : col + 1] = True
             position_ids[row, previous_col + 1 : col + 1] = torch.arange(
                 0, col - previous_col, device=input_ids.device
             )
-            c2t_maski = torch.zeros((num_token), device=input_ids.device).bool()
-            c2t_maski[previous_col + 1 : col] = True
-            cate_to_token_mask_list[row].append(c2t_maski)
         previous_col = col
 
-    cate_to_token_mask_list = [
-        torch.stack(cate_to_token_mask_listi, dim=0)
-        for cate_to_token_mask_listi in cate_to_token_mask_list
-    ]
-
-    # # padding mask
-    # padding_mask = tokenized['attention_mask']
-    # attention_mask = attention_mask & padding_mask.unsqueeze(1).bool() & padding_mask.unsqueeze(2).bool()
-
-    return attention_mask, position_ids.to(torch.long), cate_to_token_mask_list
+    return attention_mask, position_ids.to(torch.long)

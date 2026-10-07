@@ -1,10 +1,13 @@
-from collections import OrderedDict
-from copy import deepcopy
 import json
+import argparse
 import warnings
+from copy import deepcopy
+from collections import OrderedDict
+from util.slconfig import SLConfig
 
 import torch
 import numpy as np
+
 
 def slprint(x, name='x'):
     if isinstance(x, (torch.Tensor, np.ndarray)):
@@ -19,6 +22,7 @@ def slprint(x, name='x'):
     else:
         print(f'{name}.type:', type(x))
 
+
 def clean_state_dict(state_dict):
     new_state_dict = OrderedDict()
     for k, v in state_dict.items():
@@ -26,6 +30,7 @@ def clean_state_dict(state_dict):
             k = k[7:]  # remove `module.`
         new_state_dict[k] = v
     return new_state_dict
+
 
 def renorm(img: torch.FloatTensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) \
         -> torch.FloatTensor:
@@ -46,7 +51,6 @@ def renorm(img: torch.FloatTensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224
         std = torch.Tensor(std)
         img_res = img_perm * std + mean
         return img_res.permute(0,3,1,2)
-
 
 
 class CocoClassMapper():
@@ -72,8 +76,6 @@ def to_device(item, device):
         raise NotImplementedError("Call Shilong if you use other containers! type: {}".format(type(item)))
 
 
-
-# 
 def get_gaussian_mean(x, axis, other_axis, softmax=True):
     """
 
@@ -99,6 +101,7 @@ def get_gaussian_mean(x, axis, other_axis, softmax=True):
     mean_position = torch.sum(index * u, dim=2)
     return mean_position
 
+
 def get_expected_points_from_map(hm, softmax=True):
     """get_gaussian_map_from_points
         B,C,H,W -> B,N,2 float(0, 1) float(0, 1)
@@ -117,6 +120,7 @@ def get_expected_points_from_map(hm, softmax=True):
     x_mean = get_gaussian_mean(hm, 3, 2, softmax=softmax) # B,C
     # return torch.cat((x_mean.unsqueeze(-1), y_mean.unsqueeze(-1)), 2)
     return torch.stack([x_mean, y_mean], dim=2)
+
 
 # Positional encoding (section 5.1)
 # borrow from nerf
@@ -171,6 +175,7 @@ def get_embedder(multires, i=0):
     embed = lambda x, eo=embedder_obj : eo.embed(x)
     return embed, embedder_obj.out_dim
 
+
 class APOPMeter():
     def __init__(self) -> None:
         self.tp = 0
@@ -195,14 +200,14 @@ class APOPMeter():
         self.tn += tn
         self.tn += fn
 
+
 def inverse_sigmoid(x, eps=1e-5):
     x = x.clamp(min=0, max=1)
     x1 = x.clamp(min=eps)
     x2 = (1 - x).clamp(min=eps)
     return torch.log(x1/x2)
 
-import argparse
-from util.slconfig import SLConfig
+
 def get_raw_dict(args):
     """
     return the dicf contained in args.
@@ -302,7 +307,6 @@ class NiceRepr:
             return object.__repr__(self)
 
 
-
 def ensure_rng(rng=None):
     """Coerces input into a random number generator.
 
@@ -332,6 +336,7 @@ def ensure_rng(rng=None):
     else:
         rng = rng
     return rng
+
 
 def random_boxes(num=1, scale=1, rng=None):
     """Simple version of ``kwimage.Boxes.random``
@@ -395,8 +400,9 @@ class ModelEma(torch.nn.Module):
     def set(self, model):
         self._update(model, update_fn=lambda e, m: m)
 
+
 class BestMetricSingle():
-    def __init__(self, init_res=0.0, better='large') -> None:
+    def __init__(self, init_res=0.0, better='large'):
         self.init_res = init_res
         self.best_res = init_res
         self.best_ep = -1
@@ -417,13 +423,13 @@ class BestMetricSingle():
             return True
         return False
 
-    def __str__(self) -> str:
+    def __str__(self):
         return "best_res: {}\t best_ep: {}".format(self.best_res, self.best_ep)
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return self.__str__()
 
-    def summary(self) -> dict:
+    def summary(self):
         return {
             'best_res': self.best_res,
             'best_ep': self.best_ep,
@@ -431,13 +437,12 @@ class BestMetricSingle():
 
 
 class BestMetricHolder():
-    def __init__(self, init_res=0.0, better='large', use_ema=False) -> None:
+    def __init__(self, init_res=0.0, better='large', use_ema=False):
         self.best_all = BestMetricSingle(init_res, better)
         self.use_ema = use_ema
         if use_ema:
             self.best_ema = BestMetricSingle(init_res, better)
             self.best_regular = BestMetricSingle(init_res, better)
-    
 
     def update(self, new_res, epoch, is_ema=False):
         """
@@ -458,14 +463,13 @@ class BestMetricHolder():
             return self.best_all.summary()
 
         res = {}
-        res.update({f'all_{k}':v for k,v in self.best_all.summary().items()})
-        res.update({f'regular_{k}':v for k,v in self.best_regular.summary().items()})
-        res.update({f'ema_{k}':v for k,v in self.best_ema.summary().items()})
+        res.update({f'all_{k}':v for k, v in self.best_all.summary().items()})
+        res.update({f'regular_{k}':v for k, v in self.best_regular.summary().items()})
+        res.update({f'ema_{k}':v for k, v in self.best_ema.summary().items()})
         return res
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return json.dumps(self.summary(), indent=2)
 
-    def __str__(self) -> str:
+    def __str__(self):
         return self.__repr__()
-            

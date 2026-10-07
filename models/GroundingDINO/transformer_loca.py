@@ -1,6 +1,5 @@
-from .mlp_loca import MLP
-
 from torch import nn
+from .mlp_loca import MLP
 
 
 class TransformerEncoder(nn.Module):
@@ -37,7 +36,6 @@ class TransformerEncoder(nn.Module):
 
 
 class TransformerEncoderLayer(nn.Module):
-
     def __init__(
         self,
         emb_dim: int,

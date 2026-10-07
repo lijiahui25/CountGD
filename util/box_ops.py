@@ -2,7 +2,7 @@
 """
 Utilities for bounding box manipulation and GIoU.
 """
-import torch, os
+import torch
 from torchvision.ops.boxes import box_area
 
 
@@ -61,7 +61,6 @@ def generalized_box_iou(boxes1, boxes2):
     area = wh[:, :, 0] * wh[:, :, 1]
 
     return iou - (area - union) / (area + 1e-6)
-
 
 
 # modified from torchvision to also return the union
@@ -135,4 +134,3 @@ if __name__ == '__main__':
     x = torch.rand(5, 4)
     y = torch.rand(3, 4)
     iou, union = box_iou(x, y)
-    import ipdb; ipdb.set_trace()

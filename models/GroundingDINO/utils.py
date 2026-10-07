@@ -14,7 +14,6 @@ from torch import Tensor, nn
 
 
 def _get_clones(module, N, layer_share=False):
-    # import ipdb; ipdb.set_trace()
     if layer_share:
         return nn.ModuleList([module for i in range(N)])
     else:
@@ -66,52 +65,46 @@ def gen_encoder_output_proposals(
         - output_memory: bs, \sum{hw}, d_model
         - output_proposals: bs, \sum{hw}, 4
     """
-    N_, S_, C_ = memory.shape
+    N_, _, _ = memory.shape
     proposals = []
-    _cur = 0
+    _cur = 0  # 当前层在 S_ 中的起始索引
     for lvl, (H_, W_) in enumerate(spatial_shapes):
-        mask_flatten_ = memory_padding_mask[:, _cur : (_cur + H_ * W_)].view(N_, H_, W_, 1)
-        valid_H = torch.sum(~mask_flatten_[:, :, 0, 0], 1)
-        valid_W = torch.sum(~mask_flatten_[:, 0, :, 0], 1)
-
-        # import ipdb; ipdb.set_trace()
-
+        mask_flatten_ = memory_padding_mask[:, _cur : (_cur + H_ * W_)].view(N_, H_, W_, 1)  # (B, H_, W_, 1)
+        valid_H = torch.sum(~mask_flatten_[:, :, 0, 0], 1)  # (B, H_) True 表示行有效
+        valid_W = torch.sum(~mask_flatten_[:, 0, :, 0], 1)  # (B, W_) True 表示列有效
+        # 生成整数网格坐标 中心 cx, cy
         grid_y, grid_x = torch.meshgrid(
             torch.linspace(0, H_ - 1, H_, dtype=torch.float32, device=memory.device),
             torch.linspace(0, W_ - 1, W_, dtype=torch.float32, device=memory.device),
         )
-        grid = torch.cat([grid_x.unsqueeze(-1), grid_y.unsqueeze(-1)], -1)  # H_, W_, 2
-
+        grid = torch.cat([grid_x.unsqueeze(-1), grid_y.unsqueeze(-1)], -1)  # (H_, W_, 2)
+        # 归一化
         scale = torch.cat([valid_W.unsqueeze(-1), valid_H.unsqueeze(-1)], 1).view(N_, 1, 1, 2)
-        grid = (grid.unsqueeze(0).expand(N_, -1, -1, -1) + 0.5) / scale
-
-        if learnedwh is not None:
-            # import ipdb; ipdb.set_trace()
-            wh = torch.ones_like(grid) * learnedwh.sigmoid() * (2.0**lvl)
+        grid = (grid.unsqueeze(0).expand(N_, -1, -1, -1) + 0.5) / scale  # +0.5 变成像素中心
+        # 宽高 w, h
+        if learnedwh:
+            wh = torch.ones_like(grid) * learnedwh.sigmoid() * (2.0 ** lvl)
         else:
-            wh = torch.ones_like(grid) * 0.05 * (2.0**lvl)
+            wh = torch.ones_like(grid) * 0.05 * (2.0 ** lvl)  # 越小越深层的框越大
 
-        # scale = torch.cat([W_[None].unsqueeze(-1), H_[None].unsqueeze(-1)], 1).view(1, 1, 1, 2).repeat(N_, 1, 1, 1)
-        # grid = (grid.unsqueeze(0).expand(N_, -1, -1, -1) + 0.5) / scale
-        # wh = torch.ones_like(grid) / scale
-        proposal = torch.cat((grid, wh), -1).view(N_, -1, 4)
+        proposal = torch.cat((grid, wh), -1).view(N_, -1, 4)  # (B, H_*W_, 4)  (cx, cy, w, h)
         proposals.append(proposal)
         _cur += H_ * W_
-    # import ipdb; ipdb.set_trace()
-    output_proposals = torch.cat(proposals, 1)
+    
+    output_proposals = torch.cat(proposals, 1)  # 拼接所有层 (B, S, 4)
     output_proposals_valid = ((output_proposals > 0.01) & (output_proposals < 0.99)).all(
         -1, keepdim=True
-    )
+    )  # 检查每个 proposal 是否在 (0.01, 0.99) 范围内, True 表示有效
+    # 下一步的计算 log(p / (1-p)) 如果 p 接近 0 或 1 会得到无穷，所以需要过滤
+    # sigmoid 逆运算，得到 unsigmoid 的值，方便后续计算, 和参考点在同一空间
     output_proposals = torch.log(output_proposals / (1 - output_proposals))  # unsigmoid
+    # 无效位置和 padding 位置的 proposal 都被置为无穷大
     output_proposals = output_proposals.masked_fill(memory_padding_mask.unsqueeze(-1), float("inf"))
     output_proposals = output_proposals.masked_fill(~output_proposals_valid, float("inf"))
-
+    # padding 位置和非法位置的对应特征置 0
     output_memory = memory
     output_memory = output_memory.masked_fill(memory_padding_mask.unsqueeze(-1), float(0))
     output_memory = output_memory.masked_fill(~output_proposals_valid, float(0))
-
-    # output_memory = output_memory.masked_fill(memory_padding_mask.unsqueeze(-1), float('inf'))
-    # output_memory = output_memory.masked_fill(~output_proposals_valid, float('inf'))
 
     return output_memory, output_proposals
 
@@ -169,8 +162,6 @@ def sigmoid_focal_loss(
 
 
 class MLP(nn.Module):
-    """Very simple multi-layer perceptron (also called FFN)"""
-
     def __init__(self, input_dim, hidden_dim, output_dim, num_layers):
         super().__init__()
         self.num_layers = num_layers
@@ -202,8 +193,6 @@ def _get_activation_fn(activation, d_model=256, batch_dim=0):
 
 
 def gen_sineembed_for_position(pos_tensor):
-    # n_query, bs, _ = pos_tensor.size()
-    # sineembed_tensor = torch.zeros(n_query, bs, 256)
     scale = 2 * math.pi
     dim_t = torch.arange(128, dtype=torch.float32, device=pos_tensor.device)
     dim_t = 10000 ** (2 * (torch.div(dim_t, 2, rounding_mode='floor')) / 128)
@@ -219,11 +208,9 @@ def gen_sineembed_for_position(pos_tensor):
         w_embed = pos_tensor[:, :, 2] * scale
         pos_w = w_embed[:, :, None] / dim_t
         pos_w = torch.stack((pos_w[:, :, 0::2].sin(), pos_w[:, :, 1::2].cos()), dim=3).flatten(2)
-
         h_embed = pos_tensor[:, :, 3] * scale
         pos_h = h_embed[:, :, None] / dim_t
         pos_h = torch.stack((pos_h[:, :, 0::2].sin(), pos_h[:, :, 1::2].cos()), dim=3).flatten(2)
-
         pos = torch.cat((pos_y, pos_x, pos_w, pos_h), dim=2)
     else:
         raise ValueError("Unknown pos_tensor shape(-1):{}".format(pos_tensor.size(-1)))
@@ -232,42 +219,21 @@ def gen_sineembed_for_position(pos_tensor):
 
 class ContrastiveEmbed(nn.Module):
     def __init__(self, max_text_len=256):
-        """
-        Args:
-            max_text_len: max length of text.
-        """
         super().__init__()
         self.max_text_len = max_text_len
 
     def forward(self, x, text_dict):
-        """_summary_
-
-        Args:
-            x (_type_): _description_
-            text_dict (_type_): _description_
-            {
-                'encoded_text': encoded_text, # bs, 195, d_model
-                'text_token_mask': text_token_mask, # bs, 195
-                        # True for used tokens. False for padding tokens
-            }
-        Returns:
-            _type_: _description_
-        """
         assert isinstance(text_dict, dict)
-        # print(x)  #torch.Size([2, 16320, 256])
-        # print(text_dict)
 
-        # import pdb;pdb.set_trace()
-        y = text_dict["encoded_text"]  #torch.Size([2, 195, 256])
-        text_token_mask = text_dict["text_token_mask"]
+        y = text_dict["encoded_text"]  # (B, S, D)
+        text_token_mask = text_dict["text_token_mask"]  # (B, S) Tokenizer 的原始 mask
 
         res = x @ y.transpose(-1, -2)
+        # 将 padding 部分的 attention score 置为 -inf
         res.masked_fill_(~text_token_mask[:, None, :], float("-inf"))
-        # 接着，对res进行掩码操作，将未使用的文本token（即padding的token）对应的得分置为负无穷float("-inf")。这是为了在计算相似度时，排除padding部分的影响。
-
 
         # padding to max_text_len
         new_res = torch.full((*res.shape[:-1], self.max_text_len), float("-inf"), device=res.device)
-        new_res[..., : res.shape[-1]] = res  #torch.Size([2, 16320, 195])
+        new_res[..., :res.shape[-1]] = res  # (B, S_img, S_txt) 每个图像和每个文本的相似度
 
         return new_res

@@ -11,12 +11,12 @@
 # modified from https://github.com/SwinTransformer/Swin-Transformer-Object-Detection/blob/master/mmdet/models/backbones/swin_transformer.py
 # --------------------------------------------------------
 
-import numpy as np
 import torch
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
-from timm.models.layers import DropPath, to_2tuple, trunc_normal_
+from timm.layers import DropPath, to_2tuple, trunc_normal_
 
 from groundingdino.util.misc import NestedTensor
 
@@ -457,7 +457,7 @@ class BasicLayer(nn.Module):
 
 
 class PatchEmbed(nn.Module):
-    """Image to Patch Embedding
+    """Image to Patch Embedding 把图像切成不重叠的 patch 块，每个 patch 通过一个卷积投影成一个 token 向量
     Args:
         patch_size (int): Patch token size. Default: 4.
         in_chans (int): Number of input image channels. Default: 3.
@@ -469,10 +469,9 @@ class PatchEmbed(nn.Module):
         super().__init__()
         patch_size = to_2tuple(patch_size)
         self.patch_size = patch_size
-
         self.in_chans = in_chans
         self.embed_dim = embed_dim
-
+        # 使用 patch_size 尺寸的卷积核 + patch_size 步长将图像分快
         self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
         if norm_layer is not None:
             self.norm = norm_layer(embed_dim)
@@ -484,16 +483,18 @@ class PatchEmbed(nn.Module):
         # padding
         _, _, H, W = x.size()
         if W % self.patch_size[1] != 0:
+            # 右侧填充 self.patch_size[1] - W % self.patch_size[1] 个像素
             x = F.pad(x, (0, self.patch_size[1] - W % self.patch_size[1]))
         if H % self.patch_size[0] != 0:
+            # 下侧填充 self.patch_size[0] - H % self.patch_size[0] 个像素
             x = F.pad(x, (0, 0, 0, self.patch_size[0] - H % self.patch_size[0]))
 
-        x = self.proj(x)  # B C Wh Ww
+        x = self.proj(x)  # (B, C, Wh, Ww)
         if self.norm is not None:
             Wh, Ww = x.size(2), x.size(3)
-            x = x.flatten(2).transpose(1, 2)
-            x = self.norm(x)
-            x = x.transpose(1, 2).view(-1, self.embed_dim, Wh, Ww)
+            x = x.flatten(2).transpose(1, 2)  # (B, Wh*Ww, C)
+            x = self.norm(x)  # 在特征维度进行归一化操作
+            x = x.transpose(1, 2).view(-1, self.embed_dim, Wh, Ww)  # (B, C, Wh, Ww)
 
         return x
 
@@ -561,10 +562,8 @@ class SwinTransformer(nn.Module):
         self.frozen_stages = frozen_stages
         self.dilation = dilation
 
-        # if use_checkpoint:
-        #     print("use_checkpoint!!!!!!!!!!!!!!!!!!!!!!!!")
-
         # split image into non-overlapping patches
+        # 把图像切成不重叠的 patch 块，每个 patch 通过一个卷积投影成一个 token 向量
         self.patch_embed = PatchEmbed(
             patch_size=patch_size,
             in_chans=in_chans,
@@ -572,7 +571,7 @@ class SwinTransformer(nn.Module):
             norm_layer=norm_layer if self.patch_norm else None,
         )
 
-        # absolute position embedding
+        # absolute position embedding 绝对位置嵌入
         if self.ape:
             pretrain_img_size = to_2tuple(pretrain_img_size)
             patch_size = to_2tuple(patch_size)
@@ -583,28 +582,29 @@ class SwinTransformer(nn.Module):
 
             self.absolute_pos_embed = nn.Parameter(
                 torch.zeros(1, embed_dim, patches_resolution[0], patches_resolution[1])
-            )
+            )  # 每个 patch 一个可学习的位置编码
             trunc_normal_(self.absolute_pos_embed, std=0.02)
 
         self.pos_drop = nn.Dropout(p=drop_rate)
 
         # stochastic depth
+        # 从 [0, drop_path_rate] 均匀取 sum(depths) 个数字
         dpr = [
-            x.item() for x in torch.linspace(0, drop_path_rate, sum(depths))
+            x.item() for x in torch.linspace(0, drop_path_rate, sum(depths))  # item(): tensor -> float
         ]  # stochastic depth decay rule
 
         # build layers
         self.layers = nn.ModuleList()
         # prepare downsample list
-        downsamplelist = [PatchMerging for i in range(self.num_layers)]
+        downsamplelist = [PatchMerging for _ in range(self.num_layers)]  # 下采样，patch 变大
         downsamplelist[-1] = None
-        num_features = [int(embed_dim * 2**i) for i in range(self.num_layers)]
+        num_features = [int(embed_dim * 2 ** i) for i in range(self.num_layers)]  # 每次下采样后的特征维度
         if self.dilation:
             downsamplelist[-2] = None
             num_features[-1] = int(embed_dim * 2 ** (self.num_layers - 1)) // 2
+        
         for i_layer in range(self.num_layers):
             layer = BasicLayer(
-                # dim=int(embed_dim * 2 ** i_layer),
                 dim=num_features[i_layer],
                 depth=depths[i_layer],
                 num_heads=num_heads[i_layer],
@@ -616,13 +616,11 @@ class SwinTransformer(nn.Module):
                 attn_drop=attn_drop_rate,
                 drop_path=dpr[sum(depths[:i_layer]) : sum(depths[: i_layer + 1])],
                 norm_layer=norm_layer,
-                # downsample=PatchMerging if (i_layer < self.num_layers - 1) else None,
                 downsample=downsamplelist[i_layer],
                 use_checkpoint=use_checkpoint,
             )
             self.layers.append(layer)
 
-        # num_features = [int(embed_dim * 2 ** i) for i in range(self.num_layers)]
         self.num_features = num_features
 
         # add a norm layer for each output
@@ -631,7 +629,7 @@ class SwinTransformer(nn.Module):
             layer_name = f"norm{i_layer}"
             self.add_module(layer_name, layer)
 
-        self._freeze_stages()
+        self._freeze_stages()  # 根据参数冻结网络参数
 
     def _freeze_stages(self):
         if self.frozen_stages >= 0:
@@ -649,31 +647,6 @@ class SwinTransformer(nn.Module):
                 m.eval()
                 for param in m.parameters():
                     param.requires_grad = False
-
-    # def init_weights(self, pretrained=None):
-    #     """Initialize the weights in backbone.
-    #     Args:
-    #         pretrained (str, optional): Path to pre-trained weights.
-    #             Defaults to None.
-    #     """
-
-    #     def _init_weights(m):
-    #         if isinstance(m, nn.Linear):
-    #             trunc_normal_(m.weight, std=.02)
-    #             if isinstance(m, nn.Linear) and m.bias is not None:
-    #                 nn.init.constant_(m.bias, 0)
-    #         elif isinstance(m, nn.LayerNorm):
-    #             nn.init.constant_(m.bias, 0)
-    #             nn.init.constant_(m.weight, 1.0)
-
-    #     if isinstance(pretrained, str):
-    #         self.apply(_init_weights)
-    #         logger = get_root_logger()
-    #         load_checkpoint(self, pretrained, strict=False, logger=logger)
-    #     elif pretrained is None:
-    #         self.apply(_init_weights)
-    #     else:
-    #         raise TypeError('pretrained must be a str or None')
 
     def forward_raw(self, x):
         """Forward function."""
@@ -694,29 +667,17 @@ class SwinTransformer(nn.Module):
         for i in range(self.num_layers):
             layer = self.layers[i]
             x_out, H, W, x, Wh, Ww = layer(x, Wh, Ww)
-            # import ipdb; ipdb.set_trace()
-
             if i in self.out_indices:
                 norm_layer = getattr(self, f"norm{i}")
                 x_out = norm_layer(x_out)
-
                 out = x_out.view(-1, H, W, self.num_features[i]).permute(0, 3, 1, 2).contiguous()
                 outs.append(out)
-        # in:
-        #   torch.Size([2, 3, 1024, 1024])
-        # outs:
-        #   [torch.Size([2, 192, 256, 256]), torch.Size([2, 384, 128, 128]), \
-        #       torch.Size([2, 768, 64, 64]), torch.Size([2, 1536, 32, 32])]
+
         return tuple(outs)
 
     def forward(self, tensor_list: NestedTensor):
-
         x = tensor_list.tensors
-
-        """Forward function."""
         x = self.patch_embed(x)
-
-
         Wh, Ww = x.size(2), x.size(3)
         if self.ape:
             # interpolate the position embedding to the corresponding size
@@ -732,18 +693,11 @@ class SwinTransformer(nn.Module):
         for i in range(self.num_layers):
             layer = self.layers[i]
             x_out, H, W, x, Wh, Ww = layer(x, Wh, Ww)
-
             if i in self.out_indices:
                 norm_layer = getattr(self, f"norm{i}")
                 x_out = norm_layer(x_out)
-
                 out = x_out.view(-1, H, W, self.num_features[i]).permute(0, 3, 1, 2).contiguous()
                 outs.append(out)
-        # in:
-        #   torch.Size([2, 3, 1024, 1024])
-        # out:
-        #   [torch.Size([2, 192, 256, 256]), torch.Size([2, 384, 128, 128]), \
-        #       torch.Size([2, 768, 64, 64]), torch.Size([2, 1536, 32, 32])]
 
         # collect for nesttensors
         outs_dict = {}
@@ -761,11 +715,11 @@ class SwinTransformer(nn.Module):
         self._freeze_stages()
 
 
-def build_swin_transformer(modelname, pretrain_img_size, **kw):
+def build_swin_transformer(modelname, pretrain_img_size, **kwargs):
     assert modelname in [
         "swin_T_224_1k",
         "swin_B_224_22k",
-        "swin_B_384_22k",
+        "swin_B_384_22k",  # config
         "swin_L_224_22k",
         "swin_L_384_22k",
     ]
@@ -779,7 +733,7 @@ def build_swin_transformer(modelname, pretrain_img_size, **kw):
         ),
         "swin_B_384_22k": dict(
             embed_dim=128, depths=[2, 2, 18, 2], num_heads=[4, 8, 16, 32], window_size=12
-        ),
+        ),  # config
         "swin_L_224_22k": dict(
             embed_dim=192, depths=[2, 2, 18, 2], num_heads=[6, 12, 24, 48], window_size=7
         ),
@@ -787,18 +741,6 @@ def build_swin_transformer(modelname, pretrain_img_size, **kw):
             embed_dim=192, depths=[2, 2, 18, 2], num_heads=[6, 12, 24, 48], window_size=12
         ),
     }
-    kw_cgf = model_para_dict[modelname]
-    kw_cgf.update(kw)
-    model = SwinTransformer(pretrain_img_size=pretrain_img_size, **kw_cgf)
-    return model
-
-
-if __name__ == "__main__":
-    model = build_swin_transformer("swin_L_384_22k", 384, dilation=True)
-    x = torch.rand(2, 3, 1024, 1024)
-    y = model.forward_raw(x)
-    import ipdb
-
-    ipdb.set_trace()
-    x = torch.rand(2, 3, 384, 384)
-    y = model.forward_raw(x)
+    kw_cfg = model_para_dict[modelname]
+    kw_cfg.update(kwargs)
+    return SwinTransformer(pretrain_img_size=pretrain_img_size, **kw_cfg)
