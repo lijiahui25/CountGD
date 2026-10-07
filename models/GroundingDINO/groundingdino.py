@@ -24,8 +24,8 @@ from torchvision.ops.boxes import nms
 from torchvision.ops import roi_align
 from transformers import AutoTokenizer, BertModel
 
-from groundingdino.util import box_ops, get_tokenlizer
-from groundingdino.util.misc import (
+from util import box_ops
+from util.misc import (
     NestedTensor,
     get_world_size,
     inverse_sigmoid,
@@ -283,7 +283,7 @@ class GroundingDINO(nn.Module):
                             dictionnaries containing the two above keys for each decoder layer.
         """
         # 输入文本
-        captions = kwargs["captions"] if not targets else [t["caption"] for t in targets]
+        captions = kwargs["captions"] if targets is None else [t["caption"] for t in targets]
         # encoder texts
         one_hot_token = tokenized = self.tokenizer(
             captions, padding="longest", return_tensors="pt"
@@ -412,7 +412,7 @@ class GroundingDINO(nn.Module):
             out['aux_outputs'] = self._set_aux_loss(outputs_class, outputs_coord_list)
         out['token']=one_hot_token
         # for encoder output
-        if hs_enc:
+        if hs_enc is not None:
             # prepare intermediate outputs
             interm_coord = ref_enc[-1]
             interm_class = self.transformer.enc_out_class_embed(hs_enc[-1], text_dict)

@@ -23,7 +23,7 @@ import torchvision
 import torch.nn.functional as F
 from torch import nn
 from torchvision.models._utils import IntermediateLayerGetter
-from groundingdino.util.misc import NestedTensor, is_main_process
+from util.misc import NestedTensor, is_main_process
 
 from .position_encoding import build_position_encoding
 from .swin_transformer import build_swin_transformer

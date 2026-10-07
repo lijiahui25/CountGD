@@ -195,7 +195,7 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
     #     )
 
     _cnt = 0
-    output_state_dict = {}
+    # output_state_dict = {}
 
     if args.use_coco_eval:
         from pycocotools.coco import COCO
@@ -272,11 +272,11 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
     count_rmse = (np.array(abs_errs) ** 2).mean() ** 0.5
     print("# of Images Tested: " + str(len(abs_errs)))
     print("MAE: " + str(count_mae) + ", RMSE: " + str(count_rmse))
-    if args.save_results:
-        import os.path as osp
-        savepath = osp.join(args.output_dir, f'results-{utils.get_rank()}.pkl')
-        print(f"Saving res to {savepath}")
-        torch.save(output_state_dict, savepath)
+    # if args.save_results:
+    #     import os.path as osp
+    #     savepath = osp.join(args.output_dir, f'results-{utils.get_rank()}.pkl')
+    #     print(f"Saving res to {savepath}")
+    #     torch.save(output_state_dict, savepath)
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()

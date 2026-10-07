@@ -82,7 +82,7 @@ def gen_encoder_output_proposals(
         scale = torch.cat([valid_W.unsqueeze(-1), valid_H.unsqueeze(-1)], 1).view(N_, 1, 1, 2)
         grid = (grid.unsqueeze(0).expand(N_, -1, -1, -1) + 0.5) / scale  # +0.5 变成像素中心
         # 宽高 w, h
-        if learnedwh:
+        if learnedwh is not None:
             wh = torch.ones_like(grid) * learnedwh.sigmoid() * (2.0 ** lvl)
         else:
             wh = torch.ones_like(grid) * 0.05 * (2.0 ** lvl)  # 越小越深层的框越大

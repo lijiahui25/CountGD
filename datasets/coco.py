@@ -13,7 +13,6 @@ from PIL import Image
 from pycocotools import mask as coco_mask
 
 import datasets.transforms as T
-from datasets.data_util import preparing_dataset
 from util.box_ops import box_cxcywh_to_xyxy, box_iou
 
 

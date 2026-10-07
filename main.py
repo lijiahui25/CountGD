@@ -17,7 +17,7 @@ from util.utils import BestMetricHolder
 from engine import evaluate, train_one_epoch
 from util.slconfig import DictAction, SLConfig
 from util.get_param_dicts import get_param_dict
-from groundingdino.util.utils import clean_state_dict
+from util.utils import clean_state_dict
 from datasets import build_dataset, get_coco_api_from_dataset
 
 
@@ -178,7 +178,7 @@ def main(args):
             sampler_train = torch.utils.data.RandomSampler(dataset_train)
 
     # 数据集加载器
-    data_loader_val = DataLoader(dataset_val, 4, sampler=sampler_val, num_workers=args.num_workers, collate_fn=utils.collate_fn)
+    data_loader_val = DataLoader(dataset_val, 1, sampler=sampler_val, num_workers=args.num_workers, collate_fn=utils.collate_fn)
     if not args.eval:
         batch_sampler_train = torch.utils.data.BatchSampler(sampler_train, args.batch_size, True)
         data_loader_train = DataLoader(dataset_train, batch_sampler=batch_sampler_train, num_workers=args.num_workers, collate_fn=utils.collate_fn)

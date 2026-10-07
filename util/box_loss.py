@@ -101,12 +101,3 @@ def diou(bboxes1, bboxes2):
     if exchange:
         dious = dious.T
     return 1-dious
-
-
-if __name__ == "__main__":
-    x = torch.rand(10, 4)
-    y = torch.rand(10,4)
-    import ipdb;ipdb.set_trace()
-    cxy = ciou(x, y)
-    dxy = diou(x, y)
-    print(cxy.shape, dxy.shape)

@@ -22,7 +22,7 @@ import torch
 import torch.utils.checkpoint as checkpoint
 from torch import Tensor, nn
 
-from groundingdino.util.misc import inverse_sigmoid
+from util.misc import inverse_sigmoid
 
 from .fuse_modules import BiAttentionBlock
 from .ms_deform_attn import MultiScaleDeformableAttention as MSDeformAttn
@@ -222,7 +222,7 @@ class Transformer(nn.Module):
             src = src.flatten(2).transpose(1, 2)  # (B, HW, D)
             mask = mask.flatten(1)  # (B, HW)
             pos_embed = pos_embed.flatten(2).transpose(1, 2)  # (B, HW, D)
-            if self.num_feature_levels > 1 and self.level_embed:
+            if self.num_feature_levels > 1 and self.level_embed is not None:
                 lvl_pos_embed = pos_embed + self.level_embed[lvl].view(1, 1, -1)  # (B, HW, D)
             else:
                 lvl_pos_embed = pos_embed
@@ -263,7 +263,7 @@ class Transformer(nn.Module):
             )  # output_memory: (B, S, D), output_proposals: (B, S, 4) unsigmoid  (cx, cy, w, h)
             output_memory = self.enc_output_norm(self.enc_output(output_memory))  # 线性层投影 + 层归一化
             # 这里使用的 enc_out_class_embed 在外层的 groundingdino 中赋值，是一个 ContrastiveEmbed
-            if text_dict:
+            if text_dict is not None:
                 enc_outputs_class_unselected = self.enc_out_class_embed(output_memory, text_dict)
             else:
                 enc_outputs_class_unselected = self.enc_out_class_embed(output_memory)
@@ -295,7 +295,7 @@ class Transformer(nn.Module):
             else:
                 tgt_ = tgt_undetach.detach()
 
-            if refpoint_embed:
+            if refpoint_embed is not None:
                 refpoint_embed = torch.cat([refpoint_embed, refpoint_embed_], dim=1)
                 tgt = torch.cat([tgt, tgt_], dim=1)
             else:
@@ -305,7 +305,7 @@ class Transformer(nn.Module):
             tgt_ = self.tgt_embed.weight[:, None, :].repeat(1, bs, 1).transpose(0, 1)  # nq, bs, d_model
             refpoint_embed_ = self.refpoint_embed.weight[:, None, :].repeat(1, bs, 1).transpose(0, 1)  # nq, bs, 4
 
-            if refpoint_embed:
+            if refpoint_embed is not None:
                 refpoint_embed = torch.cat([refpoint_embed, refpoint_embed_], dim=1)
                 tgt = torch.cat([tgt, tgt_], dim=1)
             else:
@@ -365,21 +365,21 @@ class TransformerEncoder(nn.Module):
         super().__init__()
         if num_layers > 0:
             self.layers = _get_clones(encoder_layer, num_layers, layer_share=enc_layer_share)
-            if text_enhance_layer:
+            if text_enhance_layer is not None:
                 self.text_layers = _get_clones(
                     text_enhance_layer, num_layers, layer_share=enc_layer_share
                 )
-            if feature_fusion_layer:
+            if feature_fusion_layer is not None:
                 self.fusion_layers = _get_clones(
                     feature_fusion_layer, num_layers, layer_share=enc_layer_share
                 )
         else:
             self.layers = []
             del encoder_layer
-            if text_enhance_layer:
+            if text_enhance_layer is not None:
                 self.text_layers = []
                 del text_enhance_layer
-            if feature_fusion_layer:
+            if feature_fusion_layer is not None:
                 self.fusion_layers = []
                 del feature_fusion_layer
 
@@ -456,11 +456,17 @@ class TransformerEncoder(nn.Module):
 
         if self.text_layers:
             # generate pos_text
-            # bs, n_text, _ = memory_text.shape
-            # if pos_text is None and position_ids is None:
-            #     pos_text = torch.arange(n_text, device=memory_text.device).float().unsqueeze(0).unsqueeze(-1).repeat(bs, 1, 1)
-            #     pos_text = get_sine_pos_embed(pos_text, 256, exchange_xy=False)
-            if position_ids:
+            if pos_text is None and position_ids is None:
+                bs, n_text, _ = memory_text.shape
+                pos_text = (
+                    torch.arange(n_text, device=memory_text.device)
+                    .float()
+                    .unsqueeze(0)
+                    .unsqueeze(-1)
+                    .repeat(bs, 1, 1)
+                )
+                pos_text = get_sine_pos_embed(pos_text, num_pos_feats=256, exchange_xy=False)
+            if position_ids is not None:
                 pos_text = get_sine_pos_embed(position_ids[..., None], 256, exchange_xy=False)
 
         # main process
@@ -487,7 +493,7 @@ class TransformerEncoder(nn.Module):
                     src=memory_text.transpose(0, 1),
                     src_mask=~text_self_attention_masks,  # note we use ~ for mask here
                     src_key_padding_mask=text_attention_mask,
-                    pos=(pos_text.transpose(0, 1) if pos_text else None),
+                    pos=(pos_text.transpose(0, 1) if pos_text is not None else None),
                 ).transpose(0, 1)
 
             # main process
@@ -621,7 +627,7 @@ class TransformerDecoder(nn.Module):
                     print(e)
 
             # self.bbox_embed 在外层的 groundingdino 中赋值，是 MLP
-            if self.bbox_embed:
+            if self.bbox_embed is not None:
                 reference_before_sigmoid = inverse_sigmoid(reference_points)
                 delta_unsig = self.bbox_embed[layer_id](output)
                 outputs_unsig = delta_unsig + reference_before_sigmoid
