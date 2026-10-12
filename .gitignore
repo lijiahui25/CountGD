@@ -1,0 +1,13 @@
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+runs/
+checkpoints
+# Dataset assets stay local; retain small implementation provenance/configuration.
+data/*
+!data/tpc268_metadata/
+data/tpc268_metadata/*
+!data/tpc268_metadata/sources.json
+!data/tpc268_metadata/species_aliases.json
+!data/tpc268_metadata/unresolved_taxonomy.json
