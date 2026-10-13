@@ -23,6 +23,13 @@ def crop(image, target, region):
     target["size"] = torch.tensor([h, w])
 
     fields = ["labels", "area"]
+    point_keep = None
+    if target.get("point_supervision", False):
+        # Point GT membership is determined by its center, not carrier-box overlap.
+        points = target["points"] - target["points"].new_tensor([j, i])
+        point_keep = ((points >= 0) & (points < points.new_tensor([w, h]))).all(dim=1)
+        target["points"] = points
+        fields.append("points")
 
     # Crop exemplars.
     exemplars = target["exemplars"]
@@ -39,10 +46,17 @@ def crop(image, target, region):
     target["exemplars"] = cropped_exemplars.reshape(-1, 4)
     if "boxes" in target:
         boxes = target["boxes"]
-        max_size = torch.as_tensor([w, h], dtype=torch.float32)
-        cropped_boxes = boxes - torch.as_tensor([j, i, j, i])
-        cropped_boxes = torch.min(cropped_boxes.reshape(-1, 2, 2), max_size)
-        cropped_boxes = cropped_boxes.clamp(min=0)
+        if point_keep is not None:
+            # Keep carrier dimensions and centers intact, even at crop boundaries.
+            # Clipping these artificial boxes would shift the supervised center.
+            half_size = (boxes[:, 2:] - boxes[:, :2]) / 2
+            centers = target["points"]
+            cropped_boxes = torch.stack([centers - half_size, centers + half_size], dim=1)
+        else:
+            max_size = torch.as_tensor([w, h], dtype=torch.float32)
+            cropped_boxes = boxes - torch.as_tensor([j, i, j, i])
+            cropped_boxes = torch.min(cropped_boxes.reshape(-1, 2, 2), max_size)
+            cropped_boxes = cropped_boxes.clamp(min=0)
         area = (cropped_boxes[:, 1, :] - cropped_boxes[:, 0, :]).prod(dim=1)
         target["boxes"] = cropped_boxes.reshape(-1, 4)
         target["area"] = area
@@ -61,7 +75,9 @@ def crop(image, target, region):
     if "boxes" in target or "masks" in target:
         # favor boxes selection when defining which elements to keep
         # this is compatible with previous implementation
-        if "boxes" in target:
+        if point_keep is not None:
+            keep = point_keep
+        elif "boxes" in target:
             cropped_boxes = target['boxes'].reshape(-1, 2, 2)
             keep = torch.all(cropped_boxes[:, 1, :] > cropped_boxes[:, 0, :], dim=1)
         else:
@@ -87,6 +103,10 @@ def hflip(image, target):
     exemplars = exemplars + torch.as_tensor([w, 0, w, 0])
     # Update [target] with horizontally flipped exemplars.
     target["exemplars"] = exemplars
+
+    if target.get("point_supervision", False):
+        points = target["points"]
+        target["points"] = points * points.new_tensor([-1, 1]) + points.new_tensor([w, 0])
 
     if "boxes" in target:
         boxes = target["boxes"]
@@ -143,6 +163,9 @@ def resize(image, target, size, max_size=None):
     exemplars = target["exemplars"]
     scaled_exemplars = exemplars * torch.as_tensor([ratio_width, ratio_height, ratio_width, ratio_height])
     target["exemplars"] = scaled_exemplars
+
+    if target.get("point_supervision", False):
+        target["points"] = target["points"] * target["points"].new_tensor([ratio_width, ratio_height])
 
     if "boxes" in target:
         boxes = target["boxes"]
@@ -290,6 +313,8 @@ class Normalize(object):
             return image, None
         target = target.copy()
         h, w = image.shape[-2:]
+        if target.get("point_supervision", False):
+            target["points"] = target["points"] / target["points"].new_tensor([w, h])
         # No normalization of exemplars needed, since they are used directly for cropping.
         if "boxes" in target:
             boxes = target["boxes"]

@@ -211,49 +211,58 @@ class GroundingDINO(nn.Module):
         self.refpoint_embed = nn.Embedding(use_num_queries, self.query_dim)
 
     def add_exemplar_tokens(self, tokenized, text_dict, exemplar_tokens, labels):
-        input_ids = tokenized["input_ids"]
-        device = input_ids.device
-        new_input_ids = []
-        encoded_text = text_dict["encoded_text"]
-        position_ids = text_dict["position_ids"]
-        text_self_attention_masks = text_dict["text_self_attention_masks"]
-        new_encoded_text = []
-        new_text_token_mask = []
-        # 遍历每个图像
-        for sample_ind in range(len(labels)):
-            label = labels[sample_ind][0]  # 类别索引
-            exemplars = exemplar_tokens[sample_ind]  # 图像示例 token
-            label_count = -1
-            assert len(input_ids[sample_ind]) == len(position_ids[sample_ind])
-            # 遍历文本每个 token 位置
-            for token_ind in range(len(input_ids[sample_ind])):
-                input_id = input_ids[sample_ind][token_ind]
-                # 普通 token
-                if input_id not in self.specical_tokens and (token_ind == 0 or (input_ids[sample_ind][token_ind - 1] in self.specical_tokens)):
-                    label_count += 1
-                # 如果找到了目标类别
-                if label_count == label:
-                    # 获取图像示例 token 插入位置
-                    ind_to_insert_exemplar = token_ind
-                    while input_ids[sample_ind][ind_to_insert_exemplar] not in self.specical_tokens:
-                        ind_to_insert_exemplar += 1  # 跳过普通 token 知道遇到特殊 token 停止
+        # Strip padding before insertion, then pad the augmented batch again.
+        # Taxonomy captions have different lengths; padding must never become text.
+        input_ids = tokenized['input_ids']
+        encoded = text_dict['encoded_text']
+        rows, features, lengths = [], [], []
+        for b, label_ids in enumerate(labels):
+            length = int(tokenized['attention_mask'][b].sum())
+            ids = input_ids[b, :length]
+            label = int(label_ids[0])
+            category, insertion = -1, None
+            for i in range(length):
+                if ids[i] not in self.specical_tokens and (i == 0 or ids[i - 1] in self.specical_tokens):
+                    category += 1
+                if category == label:
+                    insertion = i
+                    while insertion < length and ids[insertion] not in self.specical_tokens:
+                        insertion += 1
                     break
-            
-            # * 表示图像 token 的位置
-            new_input_ids.append(torch.cat([input_ids[sample_ind][:ind_to_insert_exemplar], torch.tensor([1008] * exemplars.shape[0]).to(device), input_ids[sample_ind][ind_to_insert_exemplar:]]))
-            new_encoded_text.append(torch.cat([encoded_text[sample_ind][:ind_to_insert_exemplar, :], exemplars, encoded_text[sample_ind][ind_to_insert_exemplar:, :]]))
-            new_text_token_mask.append(torch.full((len(new_input_ids[sample_ind]),), True).to(device)) 
+            if insertion is None or insertion >= length:
+                raise ValueError('Caption must retain a complete target phrase and separator')
+            ex = exemplar_tokens[b]
+            rows.append(torch.cat([ids[:insertion], ids.new_full((len(ex),), 1008), ids[insertion:]]))
+            features.append(torch.cat([encoded[b, :insertion], ex, encoded[b, insertion:length]]))
+            lengths.append(length + len(ex))
+        if max(lengths) > self.max_text_len:
+            raise ValueError('Caption plus exemplars exceeds max_text_len; refusing target truncation')
+        ids = nn.utils.rnn.pad_sequence(rows, batch_first=True, padding_value=self.tokenizer.pad_token_id)
+        feats = nn.utils.rnn.pad_sequence(features, batch_first=True)
+        mask = torch.arange(ids.shape[1], device=ids.device)[None] < ids.new_tensor(lengths)[:, None]
+        tokenized['input_ids'], tokenized['attention_mask'] = ids, mask.long()
+        attention, positions = generate_masks_with_special_tokens_and_transfer_map(tokenized, self.specical_tokens)
+        attention &= mask[:, :, None] & mask[:, None, :]
+        # Keep padding diagonal defined to avoid empty softmax rows.
+        attention |= torch.diag_embed(~mask)
+        return {'encoded_text': feats, 'text_token_mask': mask, 'position_ids': positions,
+                'text_self_attention_masks': attention}
 
-        tokenized['input_ids'] = torch.stack(new_input_ids)
-        
-        text_self_attention_masks, position_ids = generate_masks_with_special_tokens_and_transfer_map(tokenized, self.specical_tokens)
-
-        return {
-            "encoded_text": torch.stack(new_encoded_text), 
-            "text_token_mask": torch.stack(new_text_token_mask), 
-            "position_ids": position_ids, 
-            "text_self_attention_masks": text_self_attention_masks
-        }
+    def encode_taxonomy_texts(self, texts, chunk_size):
+        pooled = []
+        device = self.feat_map.weight.device
+        for start in range(0, len(texts), chunk_size):
+            token = self.tokenizer(texts[start:start + chunk_size], padding='longest',
+                                   return_special_tokens_mask=True, return_tensors='pt').to(device)
+            special = token.pop('special_tokens_mask').bool()
+            if token['input_ids'].shape[1] > self.max_text_len:
+                raise ValueError('Independent taxonomy prefix exceeds max_text_len')
+            # Standard 2D attention mask is supported by the local BertModelWarper.
+            hidden = self.feat_map(self.bert(**token)['last_hidden_state'])
+            mask = token['attention_mask'].bool() & ~special
+            weights = mask.unsqueeze(-1).to(hidden.dtype)
+            pooled.append((hidden * weights).sum(1) / weights.sum(1).clamp_min(1))
+        return torch.cat(pooled)
 
     def combine_features(self, features):
         """把图像编码器不同层级的特征图上/下采样到同一尺寸，再沿通道维拼接，最后用一个投影层融合。"""
@@ -289,6 +298,10 @@ class GroundingDINO(nn.Module):
             captions, padding="longest", return_tensors="pt"
         ).to(samples.device)
 
+        if getattr(self, 'is_tpc268', False):
+            lengths = tokenized['attention_mask'].sum(dim=1)
+            if (lengths + max(len(e) for e in exemplars) > self.max_text_len).any():
+                raise ValueError('TPC caption would be truncated; adjust the shared prompt template')
         text_self_attention_masks, position_ids = \
             generate_masks_with_special_tokens_and_transfer_map(
             tokenized, self.specical_tokens
@@ -401,6 +414,14 @@ class GroundingDINO(nn.Module):
         )
 
         out = {"pred_logits": outputs_class[-1], "pred_boxes": outputs_coord_list[-1]}
+
+        if self.training and hasattr(self, 'taxonomy_aux'):
+            aux_targets = kwargs.get('taxonomy_targets', targets)
+            if aux_targets is None:
+                raise ValueError('taxonomy auxiliary training requires target metadata')
+            if hs[-1].shape[:2] != out['pred_boxes'].shape[:2]:
+                raise RuntimeError('Final query/box mismatch: DN queries must be removed consistently')
+            out['taxonomy_aux'] = self.taxonomy_aux(hs[-1], aux_targets, self.encode_taxonomy_texts)
 
         # Used to calculate losses
         bs, len_td = text_dict['text_token_mask'].shape
@@ -576,6 +597,7 @@ class SetCriterion(nn.Module):
             inds = self.matcher(for_match, [targets[j]], label_map_list[j])
             indices.extend(inds)
 
+        final_indices = indices
         tgt_ids = [v["labels"].cpu() for v in targets]
         # len(tgt_ids) == bs
         for i in range(len(indices)):
@@ -598,6 +620,10 @@ class SetCriterion(nn.Module):
         losses = {}
         for loss in self.losses:
             losses.update(self.get_loss(loss, outputs, targets, indices, num_boxes))
+
+        if self.training and 'taxonomy_aux' in outputs:
+            from .taxonomy_losses import taxonomy_losses
+            losses.update(taxonomy_losses(outputs['taxonomy_aux'], targets, final_indices))
 
         # In case of auxiliary losses, we repeat this process with the output of each intermediate layer.
         if 'aux_outputs' in outputs:
@@ -733,7 +759,7 @@ class PostProcess(nn.Module):
         return [{'scores': s, 'labels': l, 'boxes': b} for s, l, b in zip(scores, labels, boxes)]
 
 
-@MODULE_BUILD_FUNCS.registe_with_name(module_name="groundingdino")
+@MODULE_BUILD_FUNCS.registe_with_name(module_name="groundingdino", force=__name__ == "__main__")
 def build_groundingdino(args):
     device = torch.device(args.device)
     backbone = build_backbone(args)  # 视觉编码器 models/GroundingDINO/backbone/backbone.py
@@ -761,6 +787,13 @@ def build_groundingdino(args):
         sub_sentence_present=args.sub_sentence_present,
         max_text_len=args.max_text_len
     )
+
+    model.is_tpc268 = getattr(args, 'dataset_file', '') == 'tpc268'
+    if model.is_tpc268 and (args.use_level_contrast or args.use_taxonomy_entailment):
+        from .taxonomy_aux import TaxonomyAux
+        from datasets.tpc268_taxonomy import registry_from_args
+        registry = registry_from_args(args)
+        model.taxonomy_aux = TaxonomyAux(model.hidden_dim, model.feat_map.out_features, registry, args)
 
     matcher = build_matcher(args)  # 匈牙利匹配
 
@@ -793,11 +826,16 @@ def build_groundingdino(args):
         interm_weight_dict.update({k + f'_interm': v * interm_loss_coef * _coeff_weight_dict[k] for k, v in clean_weight_dict_wo_dn.items()})
         weight_dict.update(interm_weight_dict)
 
+    if getattr(args, 'use_level_contrast', False):
+        weight_dict['loss_level_contrast'] = args.lambda_contrast
+    if getattr(args, 'use_taxonomy_entailment', False):
+        weight_dict['loss_entail_tt'] = args.lambda_tt
+        weight_dict['loss_entail_tv'] = args.lambda_tv
     losses = ['labels', 'boxes']
 
     criterion = SetCriterion(matcher, weight_dict, args.focal_alpha, args.focal_gamma, losses)
     criterion.to(device)
-    postprocessors = {'bbox': PostProcess(args.num_select, args.text_encoder_type, args.nms_iou_threshold, args=args)}
+    postprocessors = {} if model.is_tpc268 else {'bbox': PostProcess(args.num_select, args.text_encoder_type, args.nms_iou_threshold, args=args)}
 
     return model, criterion, postprocessors
 
@@ -847,3 +885,104 @@ def create_positive_map_exemplar(input_ids, label, special_tokens):
                 ind_to_insert_ones += 1
             break
     return tokens_positive
+
+
+if __name__ == '__main__':
+    import argparse
+    import logging
+    import json
+    from pathlib import Path
+    from types import SimpleNamespace
+    from datasets.tpc268 import TPC268Dataset
+    from util.slconfig import SLConfig
+    from util.checkpoint import load_countgd_state
+
+    parser = argparse.ArgumentParser(description='Explicit local one-image forward/backward; no optimizer steps')
+    parser.add_argument('--smoke-check', action='store_true')
+    parser.add_argument('--config', default='config/cfg_tpc268_full.py')
+    parser.add_argument('--checkpoint', default='checkpoints/checkpoint_fsc147_best.pth')
+    parser.add_argument('--bert', default='checkpoints/bert-base-uncased')
+    parser.add_argument('--image-index', type=int, default=0)
+    parser.add_argument('--short-side', type=int, default=256)
+    parser.add_argument('--negatives', type=int, default=2)
+    parser.add_argument('--augmentation-seed', type=int, help='Reproducible real-image crop check')
+    parser.add_argument('--output', default='docs/tpc268_model_smoke.json')
+    cli = parser.parse_args()
+    if cli.smoke_check:
+        import random
+        random.seed(42)
+        torch.manual_seed(42)
+        torch.set_num_threads(min(torch.get_num_threads(), 4))
+        args = SimpleNamespace(**SLConfig.fromfile(cli.config)._cfg_dict.to_dict())
+        args.device = 'cpu'
+        args.text_encoder_type = cli.bert
+        args.data_aug_scales = [cli.short_side]
+        args.data_aug_max_size = cli.short_side * 2
+        args.negatives_per_level = cli.negatives
+        args.entailment_negatives_per_edge = cli.negatives
+        # Explicit smoke-only size/negative overrides; architecture/query count unchanged.
+        model, criterion, _ = build_groundingdino(args)
+        logger = logging.getLogger('countgd-smoke')
+        logger.addHandler(logging.StreamHandler())
+        logger.setLevel(logging.INFO)
+        checkpoint = torch.load(cli.checkpoint, map_location='cpu', weights_only=False)
+        mismatch = load_countgd_state(model, checkpoint['model'], logger)
+        del checkpoint
+        for name, p in model.named_parameters():
+            if any(word in name for word in (args.freeze_keywords or [])):
+                p.requires_grad_(False)
+        ds = TPC268Dataset(args, 'train')
+        if cli.augmentation_seed is not None:
+            random.seed(cli.augmentation_seed)
+            torch.manual_seed(cli.augmentation_seed)
+        image, target = ds[cli.image_index]
+        samples = nested_tensor_from_tensor_list([image])
+        model.train()
+        criterion.train()
+        captured = {}
+
+        def capture_queries(module, inputs):
+            captured['query'] = inputs[0]
+            inputs[0].retain_grad()
+
+        handle = model.taxonomy_aux.register_forward_pre_hook(capture_queries)
+        outputs = model(samples, [target['exemplars']], [target['labels_uncropped']],
+                        captions=[target['caption']], taxonomy_targets=[target])
+        losses = criterion(outputs, [target], [target['cap_list']], [target['caption']])
+        keys = (["loss_level_contrast"] if args.use_level_contrast else [])
+        keys += (["loss_entail_tt", "loss_entail_tv"] if args.use_taxonomy_entailment else [])
+        for k, value in losses.items():
+            assert torch.isfinite(value), k
+        total = sum(losses[k] * criterion.weight_dict[k] for k in keys)
+        total.backward()
+        handle.remove()
+        query_grad = captured['query'].grad
+        assert query_grad is not None and torch.isfinite(query_grad).all() and query_grad.abs().sum() > 0
+        for name, p in model.taxonomy_aux.named_parameters():
+            assert p.grad is not None and torch.isfinite(p.grad).all(), name
+        assert model.feat_map.weight.grad is not None and model.feat_map.weight.grad.abs().sum() > 0
+        assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in model.transformer.decoder.parameters())
+        report = {'device': 'cpu', 'checkpoint': cli.checkpoint, 'image': target['relative_path'],
+                  'image_shape': list(image.shape), 'queries': list(outputs['pred_boxes'].shape),
+                  'orig_count': int(target['orig_count']), 'transformed_count': int(target['count']),
+                  'exemplars_after_augmentation': len(target['exemplars']),
+                  'prompt_mode': args.prompt_mode, 'caption': target['caption'],
+                  'freeze_keywords': args.freeze_keywords,
+                  'taxonomy_aux_protocol': args.taxonomy_aux_protocol,
+                  'aux_query_shape': list(outputs['taxonomy_aux']['queries'].shape),
+                  'smoke_overrides': {'short_side': cli.short_side, 'negatives_per_level': cli.negatives,
+                                      'augmentation_seed': cli.augmentation_seed},
+                  'losses': {k: float(losses[k].detach()) for k in keys},
+                  'hierarchy_diagnostics': {k: float(value.detach()) for k, value in losses.items()
+                                            if k.startswith('tax_') or k == 'loss_hyp_unit_bridge'},
+                  'query_gradient_l1': float(query_grad.abs().sum()),
+                  'feat_map_gradient_l1': float(model.feat_map.weight.grad.abs().sum()),
+                  'missing_keys': mismatch.missing_keys, 'unexpected_keys': mismatch.unexpected_keys,
+                  'decoder_gradient': True, 'optimizer_steps': 0, 'counting_evaluation': False}
+        model.eval()
+        with torch.no_grad():
+            inference = model(samples, [target['exemplars']], [target['labels_uncropped']], captions=[target['caption']])
+        assert 'taxonomy_aux' not in inference
+        report['eval_skips_auxiliary_branch'] = True
+        Path(cli.output).write_text(json.dumps(report, indent=2))
+        print(json.dumps(report, indent=2))

@@ -14,6 +14,9 @@ def get_coco_api_from_dataset(dataset):
 
 
 def build_dataset(image_set, args, datasetinfo):
+    if datasetinfo["dataset_mode"] == 'tpc268':
+        from .tpc268 import build
+        return build(image_set, args, datasetinfo)
     if datasetinfo["dataset_mode"] == 'coco':
         from .coco import build as build_coco
         return build_coco(image_set, args, datasetinfo)

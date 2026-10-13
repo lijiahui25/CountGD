@@ -17,12 +17,13 @@ from util.utils import BestMetricHolder
 from engine import evaluate, train_one_epoch
 from util.slconfig import DictAction, SLConfig
 from util.get_param_dicts import get_param_dict
+from util.checkpoint import load_countgd_state, tpc268_training_protocol
 from util.utils import clean_state_dict
 from datasets import build_dataset, get_coco_api_from_dataset
 
 
 def get_args_parser():
-    parser = argparse.ArgumentParser('CountGD training and evaluation script', add_help=False)
+    parser = argparse.ArgumentParser('CountGD training and evaluation script')
     parser.add_argument('--config_file', '-c', type=str, required=True)
     parser.add_argument('--options', nargs='+', action=DictAction,
         help='override some settings in the used config, the key-value pair '
@@ -44,6 +45,7 @@ def get_args_parser():
     parser.add_argument('--finetune_ignore', type=str, nargs='+')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N')
     parser.add_argument('--eval', action='store_true')
+    parser.add_argument('--eval_split', choices=['val', 'test'], default='val')
     parser.add_argument('--num_workers', default=8, type=int)
     # parser.add_argument('--test', action='store_true')
     parser.add_argument('--debug', action='store_true', default=False)
@@ -116,6 +118,16 @@ def main(args):
     if args.use_coco_eval:
         args.coco_val_path = dataset_meta["val"][0]["anno"]
 
+    is_tpc268 = dataset_meta['val'][0]['dataset_mode'] == 'tpc268'
+    if is_tpc268:
+        from datasets.tpc268_taxonomy import registry_from_args
+        args.taxonomy_fingerprint = registry_from_args(args).fingerprint
+        if args.use_coco_eval:
+            raise ValueError('TPC-268 uses point counting evaluation, not COCO evaluation')
+        if not args.eval and args.eval_split != 'val':
+            raise ValueError('Training checkpoint selection must use val, never test')
+        if utils.is_main_process():
+            Path(args.output_dir, 'config_args_all.json').write_text(json.dumps(vars(args), indent=2))
     device = torch.device(args.device)
     # 固定随机种子
     seed = args.seed + utils.get_rank()
@@ -132,10 +144,6 @@ def main(args):
     logger.debug("build model, done.")
 
     model_without_ddp = model
-    if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=args.find_unused_params)
-        model._set_static_graph()
-        model_without_ddp = model.module
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f'number of params: {n_parameters}')
     
@@ -146,12 +154,25 @@ def main(args):
                 if keyword in name:
                     parameter.requires_grad_(False)
                     break
+    # Freeze BEFORE DDP construction. Auxiliary heads exist before both DDP and optimizer.
+    if args.distributed:
+        model = torch.nn.parallel.DistributedDataParallel(
+            model, device_ids=[args.gpu] if device.type == 'cuda' else None,
+            find_unused_parameters=args.find_unused_params or is_tpc268)
+        model_without_ddp = model.module
     param_dicts = get_param_dict(args, model_without_ddp)  # util/get_param_dicts.py
     optimizer = torch.optim.AdamW(param_dicts, lr=args.lr, weight_decay=args.weight_decay)
+    optimized = [id(p) for group in param_dicts for p in group['params']]
+    trainable = [id(p) for p in model_without_ddp.parameters() if p.requires_grad]
+    if len(optimized) != len(set(optimized)) or set(optimized) != set(trainable):
+        raise RuntimeError('Optimizer must include every trainable parameter exactly once')
+    for i, group in enumerate(param_dicts):
+        logger.info(f'Optimizer group {i}: lr={group.get("lr", args.lr)}, wd={group.get("weight_decay", args.weight_decay)}, parameters={sum(p.numel() for p in group["params"])}')
 
     # 构建数据集
     logger.debug("build dataset...")
-    dataset_val = build_dataset(image_set='val', args=args, datasetinfo=dataset_meta["val"][0])
+    eval_split = args.eval_split if args.eval else 'val'
+    dataset_val = build_dataset(image_set=eval_split, args=args, datasetinfo=dataset_meta[eval_split][0])
     if not args.eval:
         dataset_train = build_dataset(image_set='train', args=args, datasetinfo=dataset_meta["train"][0])
         logger.debug(f'samples: {len(dataset_train)}')
@@ -200,40 +221,56 @@ def main(args):
 
     # 断点续训
     output_dir = Path(args.output_dir)
-    if os.path.exists(os.path.join(args.output_dir, 'checkpoint.pth')):
+    if not args.resume and not args.eval and os.path.exists(os.path.join(args.output_dir, 'checkpoint.pth')):
         args.resume = os.path.join(args.output_dir, 'checkpoint.pth')
     
     if args.resume:
-        checkpoint = torch.load(args.resume, map_location='cpu')
+        checkpoint = torch.load(args.resume, map_location='cpu', weights_only=False)
         # if args.resume.startswith('https'):
         #     checkpoint = torch.hub.load_state_dict_from_url(args.resume, map_location='cpu', check_hash=True)
         # else:
-        #     checkpoint = torch.load(args.resume, map_location='cpu')
-        model_without_ddp.load_state_dict(clean_state_dict(checkpoint['model']), strict=False)
+        #     checkpoint = torch.load(args.resume, map_location='cpu', weights_only=False)
+        load_countgd_state(model_without_ddp, checkpoint['model'], logger,
+                           require_aux=not args.eval and hasattr(model_without_ddp, 'taxonomy_aux'))
+        if is_tpc268 and getattr(checkpoint.get('args'), 'taxonomy_fingerprint', None) != args.taxonomy_fingerprint:
+            raise ValueError('Checkpoint taxonomy registry/train split differs from current configuration')
+        if is_tpc268 and getattr(checkpoint.get('args'), 'prompt_mode', None) != args.prompt_mode:
+            raise ValueError('Checkpoint caption protocol differs; evaluate with its training prompt_mode')
         
+        if is_tpc268 and not args.eval:
+            saved = checkpoint['args']
+            for key in ('prompt_mode', 'num_exemplars', 'use_level_contrast', 'use_taxonomy_entailment',
+                        'entailment_geometry', 'aux_embed_dim', 'freeze_keywords', 'lambda_contrast',
+                        'lambda_tt', 'lambda_tv', 'aux_loss_warmup_epochs', 'temperature',
+                        'bridge_weight', 'learn_curvature', 'curvature_init', 'cone_min_radius',
+                        'cone_radial_margin', 'entailment_negatives_per_edge',
+                        'entailment_negative_margin', 'entailment_negative_weight', 'taxonomy_aux_protocol',
+                        'aux_max_instances', 'negatives_per_level', 'point_box_size_px',
+                        'data_aug_scales', 'data_aug_max_size', 'data_aug_scales2_resize',
+                        'data_aug_scales2_crop', 'data_aug_scale_overlap', 'fix_size',
+                        'tpc268_augmentation'):
+                if getattr(saved, key, None) != getattr(args, key, None):
+                    raise ValueError(f'Resume configuration differs for {key}')
         if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
             optimizer.load_state_dict(checkpoint['optimizer'])
             lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
             args.start_epoch = checkpoint['epoch'] + 1
 
     if not args.resume and args.pretrain_model_path:
-        from collections import OrderedDict
+        if is_tpc268 and args.finetune_ignore:
+            raise ValueError('TPC initialization only permits missing/new taxonomy_aux keys')
+        checkpoint = torch.load(args.pretrain_model_path, map_location='cpu', weights_only=False)['model']
+        if is_tpc268:
+            load_countgd_state(model_without_ddp, checkpoint, logger)
+        else:
+            state = clean_state_dict(checkpoint)
+            ignored = [k for k in state if any(word in k for word in (args.finetune_ignore or []))]
+            logger.info(f'Finetune ignored keys: {ignored}')
+            logger.info(str(model_without_ddp.load_state_dict({k: v for k, v in state.items() if k not in ignored}, strict=False)))
 
-        checkpoint = torch.load(args.pretrain_model_path, map_location='cpu')['model']
-        _ignorekeywordlist = args.finetune_ignore or []
-        ignorelist = []
-
-        def check_keep(keyname, ignorekeywordlist):
-            for keyword in ignorekeywordlist:
-                if keyword in keyname:
-                    ignorelist.append(keyname)
-                    return False
-            return True
-
-        logger.info(f"Ignore keys: {json.dumps(ignorelist, indent=2)}")
-        _tmp_st = OrderedDict({k:v for k, v in utils.clean_state_dict(checkpoint).items() if check_keep(k, _ignorekeywordlist)})
-        _load_output = model_without_ddp.load_state_dict(_tmp_st, strict=False)
-        logger.info(str(_load_output))
+    if is_tpc268:
+        trained_args = checkpoint.get('args', args) if args.resume else args
+        args.tpc268_training_protocol = tpc268_training_protocol(trained_args)
 
     # 测试
     if args.eval:
@@ -253,8 +290,10 @@ def main(args):
     # 训练
     print("Start training...")
     start_time = time.time()
-    best_map_holder = BestMetricHolder(init_res=100.0, better='small', use_ema=False)  # util/utils.py
+    best_map_holder = BestMetricHolder(init_res=float('inf'), better='small', use_ema=False)  # util/utils.py
 
+    if args.resume:
+        best_map_holder.best_all.best_res = checkpoint.get('best_val_mae', float('inf'))
     for epoch in range(args.start_epoch, args.epochs):
         epoch_start_time = time.time()
         if args.distributed:
@@ -269,22 +308,6 @@ def main(args):
         # if not args.onecyclelr:
         #     lr_scheduler.step()
         
-        if args.output_dir:
-            checkpoint_paths = [output_dir / 'checkpoint.pth']
-            # 学习率下降或保存检查点间隔时保存检查点
-            if (epoch + 1) % args.lr_drop == 0 or (epoch + 1) % args.save_checkpoint_interval == 0:
-                checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}.pth')
-            # 同时保存 checkpoint.pth 和 checkpoint{epoch:04}.pth, 前者用于断点续训，后者用于固定时间间隔的存档
-            for checkpoint_path in checkpoint_paths:
-                weights = {
-                    'model': model_without_ddp.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                    'lr_scheduler': lr_scheduler.state_dict(),
-                    'epoch': epoch,
-                    'args': args,
-                }
-                utils.save_on_master(weights, checkpoint_path)
-        
         # 验证
         val_mae, test_stats = evaluate(
             model, criterion, postprocessors, data_loader_val, base_ds, device, args.output_dir,
@@ -292,15 +315,18 @@ def main(args):
         )
         # 选择最优权重
         _isbest = best_map_holder.update(val_mae, epoch, is_ema=False)
+        checkpoint_paths = [output_dir / 'checkpoint.pth']
         if _isbest:
-            checkpoint_path = output_dir / 'checkpoint_best_regular.pth'
-            utils.save_on_master({
-                'model': model_without_ddp.state_dict(),
-                'optimizer': optimizer.state_dict(),
-                'lr_scheduler': lr_scheduler.state_dict(),
-                'epoch': epoch,
-                'args': args,
-            }, checkpoint_path)
+            checkpoint_paths.append(output_dir / 'checkpoint_best_regular.pth')
+        if (epoch + 1) % args.lr_drop == 0 or (epoch + 1) % args.save_checkpoint_interval == 0:
+            checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}.pth')
+        weights = {
+            'model': model_without_ddp.state_dict(), 'optimizer': optimizer.state_dict(),
+            'lr_scheduler': lr_scheduler.state_dict(), 'epoch': epoch, 'args': args,
+            'best_val_mae': best_map_holder.best_all.best_res,
+        }
+        for checkpoint_path in checkpoint_paths:
+            utils.save_on_master(weights, checkpoint_path)
         log_stats = {
             **{f'train_{k}': v for k, v in train_stats.items()},
             **{f'test_{k}': v for k, v in test_stats.items()},

@@ -1,0 +1,32 @@
+{
+  "train": [
+    "Achyranthes_affinis",
+    "Achyranthes_argentea",
+    "Achyranthes_mucronata",
+    "Achyranthes_sordescens",
+    "Agrocybe_aegerita",
+    "Doellingeria_breweri",
+    "Doellingeria_engelmannii",
+    "Doellingeria_ledophylla",
+    "Drynaria_roosii",
+    "Mitella_formosana",
+    "Musa_sapientum",
+    "Myrica_pensylvanica",
+    "Pentanema_britannicum"
+  ],
+  "val": [
+    "Gelasia_filifolia",
+    "Mentha_haplocalyx",
+    "Musa_sapientum"
+  ],
+  "test": [
+    "Achyranthes_recurvata",
+    "Achyranthes_stricta",
+    "Arenaria_paludicola",
+    "Lansium_parasiticum",
+    "Myrica_pensylvanica",
+    "Nubelaria_arisanensis",
+    "Tibetiodes_flaccida",
+    "Wedelia_mexicana"
+  ]
+}

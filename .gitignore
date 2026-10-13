@@ -11,3 +11,9 @@ data/tpc268_metadata/*
 !data/tpc268_metadata/sources.json
 !data/tpc268_metadata/species_aliases.json
 !data/tpc268_metadata/unresolved_taxonomy.json
+# Local implementation notes and experiment handoff documents.
+docs/
+# CUDA extension build products.
+models/GroundingDINO/ops/build/
+models/GroundingDINO/ops/*.egg-info/
+models/GroundingDINO/ops/*.so

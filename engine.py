@@ -11,8 +11,6 @@ from matplotlib.patches import Rectangle
 
 import util.misc as utils
 from util.utils import to_device
-from datasets.panoptic_eval import PanopticEvaluator
-from datasets.cocogrounding_eval import CocoGroundingEvaluator
 
 
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
@@ -29,15 +27,23 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     header = f'Epoch: [{epoch}]'
     print_freq = 10
     _cnt = 0
+    aux_base_weights = getattr(criterion, 'aux_base_weights', {
+        k: v for k, v in criterion.weight_dict.items()
+        if k in ('loss_level_contrast', 'loss_entail_tt', 'loss_entail_tv')})
+    criterion.aux_base_weights = aux_base_weights
+    warmup = getattr(args, 'aux_loss_warmup_epochs', 0)
 
-    for samples, targets in metric_logger.log_every(data_loader, print_freq, header, logger=logger):
+    for step, (samples, targets) in enumerate(metric_logger.log_every(data_loader, print_freq, header, logger=logger)):
+        factor = min(1., (epoch + (step + 1) / max(len(data_loader), 1)) / warmup) if warmup > 0 else 1.
+        for key, weight in aux_base_weights.items():
+            criterion.weight_dict[key] = weight * factor
         samples = samples.to(device)
         captions = [t["caption"] for t in targets]
         cap_list = [t["cap_list"] for t in targets]
         exemplars = [t["exemplars"].to(device) for t in targets]
         labels_uncropped = [t["labels_uncropped"].to(device) for t in targets]
         min_exemplars_in_batch = min([exemp.shape[0] for exemp in exemplars])
-        shot_num = min(random.randint(0, 3), min_exemplars_in_batch)
+        # shot_num = min(random.randint(0, 3), min_exemplars_in_batch)
         # REMOVE WHEN TRYING DIFFERENT NUMBERS OF VISUAL EXEMPLARS.
         shot_num = min_exemplars_in_batch
         # Adjust number of exemplars based on [shot_num].
@@ -45,9 +51,9 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         for exemp in exemplars:
             if exemp.shape[0] > 3:
                 print('WARNING: Only 3 exemplars allowed during training')
-        targets = [{k: v.to(device) for k, v in t.items() if torch.is_tensor(v)} for t in targets]
+        targets = [{k: v.to(device) if torch.is_tensor(v) else v for k, v in t.items()} for t in targets]
         with torch.amp.autocast('cuda', enabled=args.amp):
-            outputs = model(samples, exemplars, labels_uncropped, captions=captions)
+            outputs = model(samples, exemplars, labels_uncropped, captions=captions, taxonomy_targets=targets)
             loss_dict = criterion(outputs, targets, cap_list, captions)
             weight_dict = criterion.weight_dict
             losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
@@ -175,6 +181,8 @@ def get_count_errs(samples, outputs, box_threshold, text_threshold, targets, tok
 
 @torch.no_grad()
 def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, output_dir, wo_class_error=False, args=None, logger=None):
+    if getattr(data_loader.dataset, 'split', None) in ('train', 'val', 'test') and hasattr(data_loader.dataset, 'taxonomy_report'):
+        return evaluate_tpc268(model, data_loader, device, output_dir, args, logger)
     model.eval()
     criterion.eval()
 
@@ -306,3 +314,67 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
     #     stats['PQ_st'] = panoptic_res["Stuff"]
 
     return count_mae, stats
+
+
+@torch.no_grad()
+def evaluate_tpc268(model, data_loader, device, output_dir, args, logger=None):
+    """Whole-image, single-target counting. No crop, SAM, exemplar correction or GT-based postprocessing."""
+    import json
+    from pathlib import Path
+    model.eval()
+    rows = []
+    metrics = utils.MetricLogger(delimiter='  ')
+    for samples, targets in metrics.log_every(data_loader, 10, f'TPC-268 {data_loader.dataset.split}:', logger=logger):
+        samples = samples.to(device)
+        ex = [t['exemplars'].to(device) for t in targets]
+        labels = [t['labels_uncropped'].to(device) for t in targets]
+        with torch.autocast(device_type=device.type, enabled=args.amp):
+            outputs = model(samples, ex, labels, captions=[t['caption'] for t in targets])
+        for b, target in enumerate(targets):
+            # Original CountGD confidence rule: max token sigmoid per query, then threshold.
+            # A single complete phrase represents the target; no taxonomy-label correction.
+            confidence = outputs['pred_logits'][b].sigmoid().amax(-1)
+            ids = outputs['token']['input_ids'][b]
+            separators = (ids == 1012).nonzero(as_tuple=True)[0]
+            if not len(separators):
+                raise ValueError('Counting caption has no target separator')
+            end = int(separators[0])
+            phrase_ok = (outputs['pred_logits'][b, :, 1:end].sigmoid() > args.text_threshold).all(dim=-1)
+            pred = int(((confidence > args.box_threshold) & phrase_ok).sum())
+            rows.append({'image_id': int(target['image_id']), 'relative_path': target['relative_path'],
+                         'pred_count': pred, 'gt_count': int(target['orig_count']),
+                         'species': target['species'], 'species_original': target['species_original'],
+                         'organ': target['organ'], 'split': target['split'],
+                         'caption': target['caption'], 'prompt_mode': args.prompt_mode})
+    if utils.is_dist_avail_and_initialized():
+        gathered = [None] * utils.get_world_size()
+        torch.distributed.all_gather_object(gathered, rows)
+        rows = [r for shard in gathered for r in shard]
+    # DistributedSampler pads uneven splits: remove repeated IDs before global metrics.
+    rows = sorted({r['relative_path']: r for r in rows}.values(), key=lambda r: r['image_id'])
+    if len(rows) != len(data_loader.dataset):
+        raise RuntimeError(f'Incomplete evaluation: {len(rows)} of {len(data_loader.dataset)} images')
+    pred = torch.tensor([r['pred_count'] for r in rows], dtype=torch.float64)
+    gt = torch.tensor([r['gt_count'] for r in rows], dtype=torch.float64)
+    if not len(rows):
+        raise ValueError('Empty counting evaluation split')
+    err = pred - gt
+    variance = (gt - gt.mean()).square().sum()
+    from util.checkpoint import tpc268_training_protocol
+    stats = {'mae': err.abs().mean().item(), 'rmse': err.square().mean().sqrt().item(),
+             'r2': (1 - err.square().sum() / variance).item() if variance > 0 else None,
+             'images': len(rows), 'threshold': args.box_threshold, 'text_threshold': args.text_threshold, 'counting_mode': 'whole_image',
+             'crop': False, 'sam_tt_norm': False, 'exemplar_correction': False,
+             'split': data_loader.dataset.split, 'prompt_mode': args.prompt_mode,
+             'num_exemplars': args.num_exemplars, 'taxonomy_fingerprint': args.taxonomy_fingerprint,
+             'data_aug_scales': args.data_aug_scales, 'data_aug_max_size': args.data_aug_max_size,
+             'fix_size': getattr(args, 'fix_size', False),
+             'training_protocol': getattr(args, 'tpc268_training_protocol', tpc268_training_protocol(args))}
+    if utils.is_main_process():
+        dest = Path(output_dir)
+        dest.mkdir(parents=True, exist_ok=True)
+        split = data_loader.dataset.split
+        (dest / f'{split}_counts.json').write_text(json.dumps(rows, indent=2))
+        (dest / f'{split}_metrics.json').write_text(json.dumps(stats, indent=2))
+    print(f'TPC-268 counting metrics: {stats}')
+    return stats['mae'], stats

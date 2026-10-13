@@ -1,0 +1,8 @@
+{
+  "Acacia_tortilis": {
+    "canonical": "Vachellia tortilis",
+    "evidence": "https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:471662-1",
+    "reason": "Kew POWO explicitly lists Acacia tortilis as a synonym of Vachellia tortilis.",
+    "verified_on": "2026-10-12"
+  }
+}

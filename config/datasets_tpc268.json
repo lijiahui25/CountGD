@@ -1,0 +1,5 @@
+{
+  "train": [{"dataset_mode": "tpc268", "split": "train"}],
+  "val": [{"dataset_mode": "tpc268", "split": "val"}],
+  "test": [{"dataset_mode": "tpc268", "split": "test"}]
+}

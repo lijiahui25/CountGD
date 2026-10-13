@@ -1,0 +1,23 @@
+{
+  "tpc": {
+    "repo": "tiny-smart/TPC-268",
+    "commit": "a382e85013673a3485e76a2fc2af158c0f779fdf",
+    "asset_sha256": {
+      "annotations/tpc268_annotations.json": "88b47ad449b2dff18deadcdd53c876f134793b015cd892f7f7adc7424ae6acc1",
+      "annotations/tpc268_taxonomy_ids.json": "b08213a407b6796b22df14573dd44f7ab3cbd1726b0b2c084c6159e5421a8ed4",
+      "annotations/tpc268_taxonomy_vectors.json": "a50c347c03d088422df7002c67f378775c406c403ff72dae2423196100be7dd2",
+      "splits/tpc268_split.json": "36027ccee152640b67c3bc3c6b7a15d7f1dcf217c04e3cdbcab3e58f0b2072d2",
+      "splits/tpc268_test.txt": "08c3b17ec0c6027b94690970e92dcf556d2009c8b2eeebe41cb5e026c08b3824",
+      "splits/tpc268_train.txt": "775d2d2dd35dbe8909083fe6b9a50266087d9ef759d5cbd83057375b77a8619d",
+      "splits/tpc268_val.txt": "9451552255f571d0c4ad61561181f3645aaf461b0ff043bff4d47af86a411049"
+    }
+  },
+  "meru": {
+    "repo": "facebookresearch/meru",
+    "commit": "6d4430055f58354539f68668175135256f99d47f"
+  },
+  "countgd": {
+    "repo": "niki-amini-naieni/CountGD",
+    "commit": "b6f362b3f5cd20db4a171faa410dfed8f2f466d8"
+  }
+}
