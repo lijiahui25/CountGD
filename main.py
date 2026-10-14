@@ -237,6 +237,12 @@ def main(args):
         if is_tpc268 and getattr(checkpoint.get('args'), 'prompt_mode', None) != args.prompt_mode:
             raise ValueError('Checkpoint caption protocol differs; evaluate with its training prompt_mode')
         
+        if is_tpc268 and getattr(checkpoint.get('args'), 'tpc268_coordinate_policy', None) != args.tpc268_coordinate_policy:
+            raise ValueError('Checkpoint coordinate policy differs; rerun with matching data protocol')
+
+        if is_tpc268 and getattr(checkpoint.get('args'), 'tpc268_excluded_paths', None) != args.tpc268_excluded_paths:
+            raise ValueError('Checkpoint excluded image list differs from current protocol')
+
         if is_tpc268 and not args.eval:
             saved = checkpoint['args']
             for key in ('prompt_mode', 'num_exemplars', 'use_level_contrast', 'use_taxonomy_entailment',
@@ -248,7 +254,7 @@ def main(args):
                         'aux_max_instances', 'negatives_per_level', 'point_box_size_px',
                         'data_aug_scales', 'data_aug_max_size', 'data_aug_scales2_resize',
                         'data_aug_scales2_crop', 'data_aug_scale_overlap', 'fix_size',
-                        'tpc268_augmentation'):
+                        'tpc268_augmentation', 'tpc268_coordinate_policy'):
                 if getattr(saved, key, None) != getattr(args, key, None):
                     raise ValueError(f'Resume configuration differs for {key}')
         if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:

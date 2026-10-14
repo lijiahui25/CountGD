@@ -7,7 +7,7 @@ from .utils import clean_state_dict
 # checkpoint is evaluated through a baseline config that omits auxiliary heads.
 TPC268_PROTOCOL_KEYS = (
     'prompt_mode', 'freeze_keywords', 'num_exemplars', 'num_queries',
-    'tpc268_augmentation', 'data_aug_scales', 'data_aug_max_size',
+    'tpc268_augmentation', 'tpc268_coordinate_policy', 'tpc268_excluded_paths', 'data_aug_scales', 'data_aug_max_size',
     'data_aug_scales2_resize', 'data_aug_scales2_crop', 'data_aug_scale_overlap',
     'fix_size', 'point_box_size_px', 'batch_size', 'world_size', 'epochs',
     'lr', 'lr_backbone', 'lr_drop', 'weight_decay', 'clip_max_norm', 'seed',

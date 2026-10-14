@@ -13,7 +13,7 @@ from pathlib import Path
 INFERENCE_KEYS = ('split', 'threshold', 'text_threshold', 'counting_mode', 'crop',
                   'sam_tt_norm', 'exemplar_correction', 'num_exemplars',
                   'taxonomy_fingerprint', 'data_aug_scales', 'data_aug_max_size', 'fix_size')
-TRAINING_KEYS = ('num_exemplars', 'num_queries', 'tpc268_augmentation', 'data_aug_scales',
+TRAINING_KEYS = ('num_exemplars', 'num_queries', 'tpc268_augmentation', 'tpc268_coordinate_policy', 'tpc268_excluded_paths', 'data_aug_scales',
                  'data_aug_max_size', 'data_aug_scales2_resize', 'data_aug_scales2_crop',
                  'data_aug_scale_overlap', 'fix_size', 'point_box_size_px', 'batch_size',
                  'world_size', 'epochs', 'lr', 'lr_backbone', 'lr_drop', 'weight_decay',

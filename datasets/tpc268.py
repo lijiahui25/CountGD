@@ -33,11 +33,41 @@ def counting_phrase(registry, path, mode):
     return phrase
 
 
+def annotation_coordinates(annotation, size, path):
+    """Validate point labels; intersect exemplar ROIs with the image canvas.
+
+    Do not infer resize/rotation from out-of-bounds points or discard labels.
+    Return changed boxes so the full audit records every boundary correction.
+    """
+    w, h = size
+    points = torch.tensor(annotation['points'], dtype=torch.float32).reshape(-1, 2)
+    polygons = torch.tensor(annotation['box_examples_coordinates'], dtype=torch.float32).reshape(-1, 4, 2)
+    boxes = torch.cat([polygons.amin(1), polygons.amax(1)], dim=1)
+    if len(boxes) != 3 or not torch.all(boxes[:, 2:] > boxes[:, :2]):
+        raise ValueError(f'{path}: need exactly three valid exemplar boxes, received {len(boxes)}')
+    if not torch.isfinite(points).all() or not torch.isfinite(polygons).all():
+        raise ValueError(f'{path}: nonfinite coordinates')
+    outside = ((points < 0) | (points > torch.tensor([w, h]))).any(dim=1)
+    if outside.any():
+        raise ValueError(f'{path}: {int(outside.sum())} points outside original image '
+                         f'{w}x{h}; verify original image size/orientation against annotations')
+    clipped = torch.minimum(boxes.clamp(min=0), boxes.new_tensor([w, h, w, h]))
+    if not torch.all(clipped[:, 2:] > clipped[:, :2]):
+        raise ValueError(f'{path}: exemplar has no positive-area intersection with image')
+    changes = [{'index': i, 'original': boxes[i].tolist(), 'clipped': clipped[i].tolist()}
+               for i in range(3) if not torch.equal(boxes[i], clipped[i])]
+    return points, clipped, changes
+
+
 class TPC268Dataset(Dataset):
     def __init__(self, args, split, registry=None):
         self.args, self.split = args, split
         self.root = Path(args.tpc268_root)
-        self.paths = read_split(getattr(args, f'tpc268_{split}_split'))
+        original_paths = read_split(getattr(args, f'tpc268_{split}_split'))
+        excluded = set(getattr(args, 'tpc268_excluded_paths', []))
+        self.excluded_paths = sorted(set(original_paths) & excluded)
+        self.paths = [p for p in original_paths if p not in excluded]
+        print(f'TPC-268 {split} excluded: {self.excluded_paths}')
         self.registry = registry or registry_from_args(args)
         self.transforms = make_coco_transforms(split, getattr(args, 'fix_size', False), False, args)
         self.annotations = json.loads(Path(args.tpc268_annotation_file).read_text())
@@ -72,18 +102,7 @@ class TPC268Dataset(Dataset):
             image = source.convert('RGB')
         w, h = image.size
         annotation = self.annotations[Path(p).name]
-        points = torch.tensor(annotation['points'], dtype=torch.float32).reshape(-1, 2)
-        polygons = torch.tensor(annotation['box_examples_coordinates'], dtype=torch.float32).reshape(-1, 4, 2)
-        exemplars = torch.cat([polygons.amin(1), polygons.amax(1)], dim=1)
-        if len(exemplars) < 3 or not torch.all(exemplars[:, 2:] > exemplars[:, :2]):
-            raise ValueError(f'{p}: need three valid exemplar boxes, received {len(exemplars)}')
-        exemplars = exemplars[:3]
-        if not torch.isfinite(points).all() or not torch.isfinite(exemplars).all():
-            raise ValueError(f'{p}: nonfinite coordinates')
-        if ((points < 0) | (points > torch.tensor([w, h]))).any():
-            raise ValueError(f'{p}: point outside original image')
-        if ((exemplars < 0) | (exemplars > torch.tensor([w, h, w, h]))).any():
-            raise ValueError(f'{p}: exemplar outside original image')
+        points, exemplars, _ = annotation_coordinates(annotation, (w, h), p)
         # Pixel xyxy carriers before the shared transforms; final Normalize converts
         # them to cxcywh. point_supervision keeps centers exact during cropping.
         half_size = self.args.point_box_size_px / 2
@@ -130,15 +149,34 @@ if __name__ == '__main__':
         report = {}
         all_paths = set()
         unresolved = {}
+        coordinate_errors = []
         for split in ('train', 'val', 'test'):
             ds = TPC268Dataset(args, split)
             if all_paths.intersection(ds.paths):
                 raise ValueError('Official split image overlap')
             all_paths.update(ds.paths)
             missing = [p for p in ds.paths if not (ds.root / p).is_file()]
-            report[split] = {**ds.taxonomy_report, 'counts': ds.count_report, 'species_organ_units': len({tuple(p.split('/')[:2]) for p in ds.paths}), 'missing_images': missing}
+            report[split] = {**ds.taxonomy_report, 'counts': ds.count_report, 'species_organ_units': len({tuple(p.split('/')[:2]) for p in ds.paths}), 'missing_images': missing, 'excluded_paths': ds.excluded_paths}
             unresolved[split] = ds.taxonomy_report['unresolved_species']
-            if not missing:
+            corrections, errors = [], []
+            missing_set = set(missing)
+            for p in ds.paths:
+                if p in missing_set:
+                    continue
+                try:
+                    with Image.open(ds.root / p) as source:
+                        size = source.size
+                    _, _, changes = annotation_coordinates(ds.annotations[Path(p).name], size, p)
+                    if changes:
+                        corrections.append({'path': p, 'size': list(size), 'boxes': changes})
+                except (ValueError, RuntimeError, OSError, KeyError) as exc:
+                    errors.append({'path': p, 'error': str(exc)})
+            report[split]['coordinate_audit'] = {
+                'checked_images': len(ds.paths) - len(missing),
+                'clipped_exemplar_images': corrections, 'errors': errors}
+            coordinate_errors.extend(errors)
+            print(f'{split} coordinate audit: {len(corrections)} clipped exemplar images, {len(errors)} errors')
+            if not missing and not errors:
                 image, target = ds[0]
                 assert target['exemplars'].shape[1] == 4
                 assert 0 <= len(target['exemplars']) <= 3
@@ -175,7 +213,10 @@ if __name__ == '__main__':
             report['tokenizer_audit'] = token_report
             print(f'Tokenizer audit: {token_report}')
         Path(cli.output).write_text(json.dumps(report, indent=2))
-        Path('data/tpc268_metadata/unresolved_taxonomy.json').write_text(json.dumps(unresolved, indent=2))
+        Path(cli.output).with_suffix('.unresolved_taxonomy.json').write_text(json.dumps(unresolved, indent=2))
+        if coordinate_errors or any(report[s]['missing_images'] for s in ('train', 'val', 'test')):
+            raise ValueError(f'Full dataset audit failed: {len(coordinate_errors)} coordinate errors; '
+                             f'check missing_images and coordinate_audit in {cli.output}')
     if cli.crop_smoke_check:
         import random
         import datasets.transforms as T

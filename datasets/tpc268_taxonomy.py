@@ -28,7 +28,7 @@ def read_split(path):
 
 
 class TaxonomyRegistry:
-    def __init__(self, ids_file, vectors_file, train_split, aliases_file=None):
+    def __init__(self, ids_file, vectors_file, train_split, aliases_file=None, excluded_paths=()):
         self.ids = json.loads(Path(ids_file).read_text())
         self.vectors = json.loads(Path(vectors_file).read_text())
         self.aliases = json.loads(Path(aliases_file).read_text()) if aliases_file else {}
@@ -66,7 +66,7 @@ class TaxonomyRegistry:
                     if u in self.parent and self.parent[u] != uids[l - 1]:
                         raise ValueError(f'Conflicting parent for {names[l]}')
                     self.parent[u] = uids[l - 1]
-        self.train_paths = read_split(train_split)
+        self.train_paths = [p for p in read_split(train_split) if p not in set(excluded_paths)]
         self.train_nodes = [set() for _ in RANKS]
         self.train_edges = set()
         self.train_units = set()
@@ -105,4 +105,5 @@ class TaxonomyRegistry:
 
 def registry_from_args(args):
     return TaxonomyRegistry(args.tpc268_taxonomy_ids_file, args.tpc268_taxonomy_vectors_file,
-                            args.tpc268_train_split, args.tpc268_species_aliases_file)
+                            args.tpc268_train_split, args.tpc268_species_aliases_file,
+                            getattr(args, "tpc268_excluded_paths", ()))

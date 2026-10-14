@@ -1,5 +1,5 @@
 [project]
-name = "hgic"
+name = "countgd"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -18,11 +18,15 @@ dependencies = [
     "yapf>=0.43.0",
 ]
 
-[[index]]
+[[tool.uv.index]]
 url = "https://mirrors.cernet.edu.cn/pypi/web/simple"
 default = true
 
-[[index]]
+[[tool.uv.index]]
 name = "pytorch-cu130"
 url = "https://mirrors.nju.edu.cn/pytorch/whl/cu130"
 explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu130" }
+torchvision = { index = "pytorch-cu130" }

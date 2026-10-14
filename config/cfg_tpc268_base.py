@@ -41,3 +41,13 @@ taxonomy_aux_protocol = 'negative_parents_valid_cones_v2'
 aux_loss_warmup_epochs = 1
 # All six methods share the original CountGD training resize/crop augmentation.
 # Evaluation stays whole-image, without inference crop/SAM/correction.
+
+# Keep all point labels; clip only intersecting exemplar boxes to image bounds.
+tpc268_coordinate_policy = 'strict_points_clip_exemplars_v1'
+
+# Shared by every baseline/auxiliary configuration; source files stay untouched.
+tpc268_excluded_paths = [
+    'Malus_domestica/fruit/Malus_domestica_fruit_1.jpg',
+    'Musa_sapientum/fruit/Musa_sapientum_fruit_45.jpg',
+    'Punica_granatum/fruit/Punica_granatum_fruit_17.jpg',
+]
