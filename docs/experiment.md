@@ -1,485 +1,484 @@
-# TPC-268 实验协议与执行记录
+# CountGD / TPC-268 阶段实验报告与后续计划
 
-更新：2026-10-14；代码基线 `0c99a25`。实现差异见 [implement.md](implement.md)。本文同时承担可交给 Codex 的命令手册和后续实验记录；以后每次仓库工作都同步更新这两个文档。
+**报告更新：2026-10-17，Asia/Shanghai。** 本次状态采集约11:26–11:28，R04/R05完成并核验best-val，R07仍在训练；10月16日test快照保留各自权重身份。新增论文复现协议审计与优先级修订，见附录A的2026-10-17说明。本报告是实验记录的固定入口，后续按第10节规则持续更新。实现细节见 [implement.md](implement.md)。
 
-**已知状态**：用户确认 Ubuntu 服务器已开始训练。当前本地没有服务器日志，因此实际运行 ID、开始时间、使用的 commit、配置、seed、输出路径和结果都尚未核实。下方 R01–R19 是预定矩阵，不代表相应任务已启动。服务器 Codex 应先把正在运行的任务和真实日志回填到本文第 8 节，再决定是否执行余下命令；不得重复启动同一 run。
+实验根目录：`runs/tpc268_v3_exclude3/`。当前代码HEAD=`8a26e86cffc8f5209c7924cf0d425044eaa0bdd4`，存在已记录的工作区修改；**当前HEAD不等于每个实验启动时的代码版本**，详见第9节。所有指标来自实际日志、最佳checkpoint元数据或计数JSON；没有结果的单元格用“—”，不填推测值。
 
-**协议版本**：GitHub `0c99a25` 开始统一排除三张错误标注图，并裁剪与图像相交的越界 exemplar。它与之前的 `9df0651` 数据协议不同。已在旧版本启动的训练应在原代码/原配置下继续，记录旧 commit 和独立输出目录；不要以新版本续训旧 checkpoint，也不要直接和新协议结果作成对消融。以下是当前代码的新实验模板，目录使用 `runs/tpc268_exclusions_v1/`；已有服务器目录必须按实际情况登记。
+## 1. 当前结论摘要
 
-## 给服务器 Codex 的任务
+- R01/R02/R03均已完成30轮训练、best-val独立重评及用户指定的2000张test评估；退出码均为0。
+- R04/R05均已完成30轮训练及best-val重评，退出码0；分别于10月17日07:13:21/01:50:16结束。best仍为第11/12轮，无更新。最终best文件SHA256与10月16日已评估快照一致，已有test可用于相同最终选定权重，无需重复推理。
+- R07完成21轮，正在第22轮；best已从第1轮更新为第16轮，val MAE=11.0701、RMSE=36.0906、R²=0.8863。10月16日test=13.3415对应旧第1轮，不能作为当前best的test。该训练继续按原预算进行。
+- 完整辅助方案R02相对同文本基线R01：val MAE恶化，但test MAE小幅降低、RMSE升高。证据是**单seed、数据划分和指标相关的取舍**，不支持“全面提升”，也不足以证明contrast或双曲建模分别无效。
+- 10月17日用户先提出论文Table 4全分类文本基线复现，随后明确要求先提供原计划R08层级蕴涵实验的启动命令。R08现为READY，GPU0脚本已准备但尚未执行；R07不修改。论文初始化与训练配方仍待核实，P01继续记录缺项，不能把R08或猜测配置称作论文完全复现。
 
-先记录正在运行的真实实验与环境，再按 M0 → M1 → M2 → M3 的未完成部分执行；每阶段更新本文第 8 节。M4 是正式结论所需的多 seed 扩展。不要新增独立测试文件，不要下载本地已有的数据集、标注或权重。数据/权重/`runs/` 不提交；`docs/implement.md` 与 `docs/experiment.md` 进入 Git 并随之后的工作同步维护。
+## 2. 模型结构与训练目标有什么修改
 
-机器、数据、驱动或 CUDA 算子不满足 M0 时，先修复具体问题并重做检查，再开始新的正式训练。计数指标没有提升也是有效结果；不要为得到正结果反复挑 seed、挑 test 阈值或改标签。任何协议变更须写入本文，使用新输出目录并重跑相应基线。以下模板默认单 GPU、FP32、batch size 4；服务器已有任务以实测配置为准。
+### 2.1 基础模型与TPC适配
 
-## 1. 要验证的主张和固定边界
+所有实验沿用CountGD的Swin-B、BERT、Feature Enhancer、Transformer Decoder、900个queries及原预测头；没有另换视觉backbone、语言模型、Decoder或主计数头。默认冻结`backbone.0`和`bert`；共享`feat_map`、Enhancer、Decoder、原预测头等未被冻结的参数按既有参数组训练。基线不启用新增taxonomy辅助分支。
 
-| 主张 | 要排除的解释 | 最低证据 | 对应实验 |
-|---|---|---|---|
-| C1：基于匹配对象 query 的层级辅助训练能改善官方划分上的计数泛化 | 收益只来自更丰富的主 caption 或一次幸运 seed | 同 caption、同冻结策略的计数对照；多 seed；species/organ 主 caption 控制 | B1、B2、B4 |
-| C2：Lorentz 锥几何在同辅助目标下比欧氏锥几何更有效 | 任意额外监督均有相同收益，几何没有独立贡献 | full、contrast-only、entailment-only、Euclidean 对照；几何主张需多 seed | B3、B4 |
+针对TPC点标注新增Dataset、taxonomy registry和整图计数评估入口；2px伪框只承载点中心，匹配及L1只监督中心，GIoU代价/权重为0。原flip/resize/crop策略保留，同步变换点和exemplar；不同长度caption的视觉exemplar插入修复为去padding→插入→重新padding，保留正确attention mask。上述是各组共同的适配，不是仅辅助方法才获得的改动。
 
-当前仅是原型，尚无正式训练结果。以下“预期”是待验证假设与判定条件，不是已取得的结果，也不是承诺的 MAE/RMSE 数值。
+因此R01/R03/R05是**当前TPC训练/输入协议下的CountGD基线**，不是对原论文训练配方的逐项复现。三组基线之间的主文本不同。
 
-### 数据和模型协议
+### 2.2 新增辅助分支
 
-- 官方 train/val/test 原始数量为 7000/1000/2000 张；当前统一排除 2 张 train、1 张 val，有效数量为 6998/999/2000 张。验证集用于 checkpoint 选择，测试集只用于最终报告。species-organ 单元划分不能等同于完全无重叠的 species 划分：当前 train-val、train-test、val-test 原始 species 名称分别重叠 3、7、4 个。若声称“未见物种泛化”，必须从最终逐图结果单独报告未见 species 子集。
-- 固定当前 alias 与 taxonomy registry。当前有 22 个原始 species 名称未匹配；可解析图像覆盖率 train 6545/6998、val 943/999、test 1895/2000。除三张明确排除图外，其余图像保留计数监督，无法解析的图像跳过层级辅助监督；full-taxonomy caption 在这部分退回 species 文本。不能报告成 100% 层级覆盖。
-- 当前审计实际有 269 个 species-organ 单元。保留官方原文件；只按明确的数据质量规则排除三张图，不为对齐名称中的“268”删单元。当前有效 train 中原始 count 超过 900 的图像有 64 张、最大 1462；val 最大 833，test 最大 709。
-- 所有独立训练从 `checkpoints/checkpoint_fsc147_best.pth` 初始化，BERT/tokenizer 从 `checkpoints/bert-base-uncased` 读取。不要把 baseline 微调后的权重当作 full 的初始化。
-- Swin backbone 与 BERT 按原配置冻结；共享 `feat_map`、Feature Enhancer、Decoder、预测头按原训练设置训练。启用辅助项时，再训练 query/text 两个 128 维小头。冻结 BERT 不等于冻结共享适配器：辅助文本梯度能进入 `feat_map`。不引入新 BERT、CLIP、LoRA 或各层独立图像头。
-- 900 个 query、DN=0，最终 Decoder query 与最终预测的 Hungarian 匹配对应；计数损失不变。辅助实例每图至多抽取 64 个已匹配 GT query，此上限不删 GT，也不改变计数目标。
-- 训练使用原 CountGD 随机 flip + resize/crop 策略：一半走直接随机 resize，另一半走 400/500/600 resize → 384–600 random crop → 最终随机 resize，短边 480–800、长边上限 1333。裁掉的点同步从 GT 删除，crop 后 exemplar 为 0–3 个，batch 按剩余最少 exemplar 数统一；原始标注仍须有三个合法 exemplar；先将与图像相交的越界 ROI 截到原图内，点越界则报错。
-- 验证/测试固定短边 800、长边上限 1333，使用三个 exemplar 和原图 GT count。主结果统一整图推理，box threshold 0.23、text threshold 0，不加 adaptive crop、SAM、exemplar correction。
-- 原仓库自适应裁切按**预测数达到 900**触发；真实 count 小于 900 不能排除预测过多时触发。SAM 和 exemplar correction 也不是由这个 GT 条件统一控制。本计划现有 TPC-268 评估入口没有这三个后处理开关，不使用不存在的命令。
-- AdamW，基础 LR 1e-4、weight decay 1e-4、梯度裁剪 0.1；30 epochs，StepLR 每 10 epochs 衰减。相同冻结/参数组设置，单 GPU batch size 4，seed 首轮 42，正式复跑 43、44，不启用 `--amp`。
-- full 的权重：contrast 0.1、TT 0.05、TV 0.05，辅助权重第一 epoch 按 step 线性 warmup。曲率 c=1 固定；合法半径映射开启；每相邻文本边至多 16 个错误父节点，排除真实祖先，negative margin=0.1、negative weight=1。
-- 文本 TT 包含正确父边、错误父节点负蕴涵及 species→species-organ 任务 bridge。TV 当前只实现正确计数单元→匹配 query 的正蕴涵；错误文本父节点与 query 的锥关系是诊断指标，**没有额外 TV 负蕴涵损失**。entailment-only 因而不能解释成完整的视觉分支排斥目标。
-- species→species-organ 是计数任务 bridge，不是生物分类学第八级。主 query 已接受 caption/exemplars 条件，不能把辅助分类或锥包含率直接叫作纯图像识别能力。
+R02/R04在训练时取最终Decoder的对象query（与最终logits/boxes同序），依据最终Hungarian匹配选GT对应query，最多每图抽64个辅助实例；原GT和计数目标不删改。
 
-主 caption 三种模式，例如同一图像分别用 `fruit of Abutilon indicum; taxonomy: ... .`、`fruit of Abutilon indicum .`、`fruit .`。每对 baseline/full 必须具有完全相同主 caption；organ 控制仍保留器官名称与视觉 exemplar。训练辅助文本由七级 registry 的独立 prefix 与计数单元组成，使用同一 BERT/feat_map；推理不需要辅助文本编码。
+新增两个模型内注册的投影头：query与辅助文本各一个`Linear(256,256) → GELU → Linear(256,128)`。独立辅助文本复用同一个BERT和共享`feat_map`，按非padding/非特殊token进行mean pooling，按step去重、每块32条编码；没有新BERT/CLIP、LoRA、跨step隐藏特征缓存或每层独立视觉头。辅助文本梯度可进入共享`feat_map`，不能因BERT冻结就声称共享文本通路完全不受影响。
 
-## 2. 服务器准备：M0
-
-以下 shell 块从仓库根目录执行，使用 Bash。服务器先拉取远程 main（其中已经包含本文件），并上传全部本地数据与标注目录、完整权重。上传 `data/TPC-268/`、`data/tpc268_metadata/annotations/`、`data/tpc268_metadata/splits/`、`checkpoints/` 的实际文件；不要只复制 macOS 的绝对路径符号链接。小型 sources/alias/unresolved 元数据随代码提交，dataset annotations 和图像不随 Git 提交。
-
-### 2.1 锁定依赖并记录设备
-
-```bash
-set -euo pipefail
-mkdir -p runs/tpc268_exclusions_v1/preflight
-uv --version
-uv sync --locked --python 3.10
-nvidia-smi | tee runs/tpc268_exclusions_v1/preflight/nvidia-smi.txt
-nvcc --version | tee runs/tpc268_exclusions_v1/preflight/nvcc.txt
-uv run --no-sync python - <<'PY' | tee runs/tpc268_exclusions_v1/preflight/environment.json
-import json, platform, torch
-from torch.utils.cpp_extension import CUDA_HOME
-assert torch.cuda.is_available(), 'CUDA unavailable: repair driver/runtime before training'
-assert CUDA_HOME, 'CUDA toolkit/nvcc required to compile the extension'
-print(json.dumps({'python': platform.python_version(), 'torch': torch.__version__,
-                  'torch_cuda': torch.version.cuda, 'CUDA_HOME': CUDA_HOME,
-                  'gpu': torch.cuda.get_device_name(0),
-                  'gpu_memory_bytes': torch.cuda.get_device_properties(0).total_memory}, indent=2))
-PY
-git rev-parse HEAD > runs/tpc268_exclusions_v1/preflight/git_commit.txt
-uv pip freeze > runs/tpc268_exclusions_v1/preflight/packages_before_extension.txt
-```
-
-当前 lock 固定 torch 2.13.0 / torchvision 0.28.0，`pyproject.toml` 用 uv 的 `[[tool.uv.index]]` 和 `[tool.uv.sources]` 明确选择 CUDA 13 wheel；必须核对实际安装的 `torch.version.cuda`、nvcc、驱动与 GPU 架构。不要把 `nvidia-smi` 显示的最高 CUDA 支持版本当成已安装的 nvcc。运行包有 CUDA runtime 不代表系统已有编译工具链。
-
-依赖安装失败或机器不支持该组合时，停止 M0，明确记录错误。只有在选定并验证另一套 Python/PyTorch/CUDA/lock 后，才能另开协议目录重新开始全部对照；不要仅为某一种方法换环境。本轮仍以 lock 与服务器实际安装结果为准。
-
-### 2.2 编译现有 CUDA 扩展并执行现有检查
-
-```bash
-uv pip install --python .venv/bin/python setuptools wheel ninja
-MAX_JOBS=4 uv pip install --python .venv/bin/python --no-build-isolation --no-deps ./models/GroundingDINO/ops
-uv run --no-sync python -c 'import MultiScaleDeformableAttention; print("CUDA extension import passed")'
-uv run --no-sync python models/GroundingDINO/ops/test.py | tee runs/tpc268_exclusions_v1/preflight/cuda_ops.txt
-uv pip freeze > runs/tpc268_exclusions_v1/preflight/packages.txt
-```
-
-通过标准：扩展可导入，现有检查的两项 forward 对照和四项 gradcheck 都输出 `True`，无 CUDA kernel error。这个旧检查脚本的 forward 部分只打印布尔值，必须检查输出，不能只看退出码。代码已将旧 THC 头文件、Tensor `.type()` 分派和 `.data<T>()` 更新为现行 ATen 接口；macOS 无法验证真实 CUDA 编译，服务器这一步是必需门槛。
-
-之后统一 `uv run --no-sync`，不要在中间重新 `uv sync` 清掉额外安装的扩展。需要更新依赖时重新安装扩展并复查。参考 [uv 同步语义](https://docs.astral.sh/uv/concepts/projects/sync/) 与 [uv/PyTorch 官方指南](https://docs.astral.sh/uv/guides/integration/pytorch/)。
-
-### 2.3 文件指纹、数据、crop 和几何检查
-
-```bash
-export HF_HUB_OFFLINE=1
-export TRANSFORMERS_OFFLINE=1
-export MPLCONFIGDIR="$PWD/runs/tpc268_exclusions_v1/.mpl-cache"
-export CUDA_VISIBLE_DEVICES=0
-uv run --no-sync python - <<'PY' > runs/tpc268_exclusions_v1/preflight/input_sha256.json
-import hashlib, json
-from pathlib import Path
-files = [Path('checkpoints/checkpoint_fsc147_best.pth'), Path('uv.lock')]
-files += sorted(Path('checkpoints/bert-base-uncased').rglob('*'))
-files += sorted(Path('data/tpc268_metadata').rglob('*'))
-out = {}
-for p in files:
-    if p.is_file():
-        h = hashlib.sha256()
-        with p.open('rb') as f:
-            for chunk in iter(lambda: f.read(1024 * 1024), b''):
-                h.update(chunk)
-        out[str(p)] = h.hexdigest()
-assert 'checkpoints/checkpoint_fsc147_best.pth' in out
-assert Path('checkpoints/bert-base-uncased/config.json').is_file()
-assert Path('data/TPC-268').is_dir()
-print(json.dumps(out, indent=2))
-PY
-uv run --no-sync python -m datasets.tpc268 --audit --crop-smoke-check \
-  --config config/cfg_tpc268_full.py --tokenizer checkpoints/bert-base-uncased \
-  --output runs/tpc268_exclusions_v1/preflight/data_audit.json
-uv run --no-sync python - <<'PY'
-import json
-from pathlib import Path
-x = json.loads(Path('runs/tpc268_exclusions_v1/preflight/data_audit.json').read_text())
-for split, count in [('train', 6998), ('val', 999), ('test', 2000)]:
-    assert x[split]['images'] == count
-    assert not x[split]['missing_images'], (split, x[split]['missing_images'])
-    assert not x[split]['coordinate_audit']['errors'], (split, x[split]['coordinate_audit']['errors'])
-assert len({x[s]['registry_fingerprint'] for s in ('train', 'val', 'test')}) == 1
-assert x['train']['registry_fingerprint'] == 'cf080ec256b9f9595a0cd6110b30d80fa84da0d49799217054e682185d79d65d'
-assert [len(x[s]['excluded_paths']) for s in ('train', 'val', 'test')] == [2, 1, 0]
-print('Effective split sizes, coordinates, exclusions and registry consistency passed')
-PY
-uv run --no-sync python -m models.GroundingDINO.taxonomy_losses --smoke-check
-uv run --no-sync python tools/compare_tpc268_runs.py --smoke-check
-```
-
-通过标准：三个 split 无图片交叉；官方 txt/JSON 单元交叉核对通过；缺失图片为零；annotation/exemplar 校验无错误；crop 后 GT/count/exemplar 同步、空目标可用；完整主文本和辅助 prefix 不被截断。Lorentz/Euclidean 检查须有有限梯度、合法半径和同方向坍缩被负蕴涵惩罚。审计将未解析名称写到输出 JSON 的同名 `.unresolved_taxonomy.json` 旁文件，不修改仓库内的 provenance 元数据；确认 coverage/fingerprint 与固定协议一致。当前本地审计：train/val/test 的越界 exemplar 修正图数为 91/1/0，剩余坐标错误 0。
-
-可选 CPU 模型复查（已有入口，非 GPU 训练证明）：
-
-```bash
-uv run --no-sync python -m models.GroundingDINO.groundingdino --smoke-check \
-  --config config/cfg_tpc268_organ_full.py --augmentation-seed 0 \
-  --output runs/tpc268_exclusions_v1/preflight/cpu_model_smoke.json
-```
-
-### 2.4 真正的 GPU optimizer 短程检查
-
-```bash
-for variant in baseline full organ_full euclidean; do
-  uv run --no-sync python main.py -c "config/cfg_tpc268_${variant}.py" \
-    --datasets config/datasets_tpc268.json --device cuda --seed 42 --num_workers 4 \
-    --pretrain_model_path checkpoints/checkpoint_fsc147_best.pth --debug --save_log \
-    --output_dir "runs/tpc268_exclusions_v1/preflight/gpu_${variant}" \
-    --options text_encoder_type=checkpoints/bert-base-uncased epochs=1 batch_size=4
-done
-```
-
-`--debug` 只把训练截到约 15 个 optimizer step，验证仍跑完整 999 张，所以此阶段不是几秒钟检查。crop、文本长度和辅助项改变显存，必须至少覆盖上述四种配置。通过标准：实际 CUDA 前向/反向/更新完成、loss 无 NaN/Inf、没有锥定义域异常、保存 checkpoint 和验证 JSON 成功。查看梯度通路与日志时，应确认冻结 encoder、共享适配器和辅助小头的状态符合固定协议。短程中辅助权重尚处在 warmup，不能根据此时数值判断方法有效性。
-
-若 OOM，先在所有配置统一改 `batch_size=2` 或 `1`，重做本节；随后修改下方 helper 的固定 batch，并另建协议目录。当前没有梯度累积实现，不宣称 batch 变小仍有相同有效 batch。不得使用 debug checkpoint 开始正式 run。
-
-## 3. 正式训练命令与顺序
-
-### 3.1 建立复用命令
-
-以下块在当前 Bash 中定义函数，也可整体保存为忽略目录下的 `runs/tpc268_exclusions_v1/helpers.sh`，以后 `source` 它。每个 run 有唯一目录；重复执行同一个训练函数会从该目录的 `checkpoint.pth` 自动续训，评估加载该 run 的最佳验证 checkpoint。
-
-```bash
-set -euo pipefail
-export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 CUDA_VISIBLE_DEVICES=0
-export MPLCONFIGDIR="$PWD/runs/tpc268_exclusions_v1/.mpl-cache"
-TPC_RUN_ROOT="runs/tpc268_exclusions_v1"
-train_run() {
-  local run_id="$1" cfg="$2" seed="$3"
-  shift 3
-  mkdir -p "$TPC_RUN_ROOT/${run_id}_seed${seed}"
-  uv run --no-sync python main.py -c "$cfg" \
-    --datasets config/datasets_tpc268.json --device cuda --seed "$seed" --num_workers 4 \
-    --pretrain_model_path checkpoints/checkpoint_fsc147_best.pth --save_log \
-    --output_dir "$TPC_RUN_ROOT/${run_id}_seed${seed}" \
-    --options text_encoder_type=checkpoints/bert-base-uncased batch_size=4 "$@" \
-    2>&1 | tee -a "$TPC_RUN_ROOT/${run_id}_seed${seed}/console.txt"
-}
-eval_run() {
-  local run_id="$1" cfg="$2" seed="$3" split="${4:-val}"
-  local run_dir="$TPC_RUN_ROOT/${run_id}_seed${seed}"
-  test -f "$run_dir/checkpoint_best_regular.pth"
-  mkdir -p "$run_dir/$split"
-  uv run --no-sync python main.py -c "$cfg" \
-    --datasets config/datasets_tpc268.json --device cuda --seed "$seed" --num_workers 4 \
-    --eval --eval_split "$split" --resume "$run_dir/checkpoint_best_regular.pth" \
-    --output_dir "$run_dir/$split" \
-    --options text_encoder_type=checkpoints/bert-base-uncased batch_size=4 \
-    2>&1 | tee -a "$run_dir/$split/console.txt"
-}
-```
-
-评估返回的 `training_protocol` 来自训练 checkpoint。训练目录根下的 `val_counts.json` 会每 epoch 覆盖，通常对应最后 epoch；最终比较必须用 helper 重评 best 后的 `<run>/val/`，不能把最后 epoch 指标冒充最佳 checkpoint 指标。训练 `log.txt` 中的 `test_mae` 实际是当 epoch 的 **val** MAE，不是 test。
-
-### 3.2 第一阶段 M1：先建立 full-taxonomy 主结果（R01–R02）
-
-```bash
-# R01：原计数目标，无层级辅助；full-taxonomy 主 caption。
-train_run full_baseline config/cfg_tpc268_baseline.py 42
-eval_run  full_baseline config/cfg_tpc268_baseline.py 42 val
-# R02：逐级对比 + Lorentz TT/TV；与 R01 相同主 caption。
-train_run full_method config/cfg_tpc268_full.py 42
-eval_run  full_method config/cfg_tpc268_full.py 42 val
-uv run --no-sync python tools/compare_tpc268_runs.py \
-  "$TPC_RUN_ROOT/full_baseline_seed42/val" "$TPC_RUN_ROOT/full_method_seed42/val" \
-  --output "$TPC_RUN_ROOT/M1_val_comparison.json"
-```
-
-预期：两者计数训练稳定；若辅助监督有用，R02 的 val MAE/RMSE 应低于 R01，并具有较好的正确父锥包含率/较低错误父锥包含率。单 seed 的改进只能作为候选证据。若只有锥指标变好、计数不变，不能支持 C1；仍继续下一阶段定位原因。
-
-### 3.3 第二阶段 M2：控制主 caption 中的分类信息（R03–R06）
-
-```bash
-# R03/R04：仅 species + organ，不输入七级主 caption。
-train_run species_baseline config/cfg_tpc268_species.py 42
-eval_run  species_baseline config/cfg_tpc268_species.py 42 val
-train_run species_method config/cfg_tpc268_species_full.py 42
-eval_run  species_method config/cfg_tpc268_species_full.py 42 val
-uv run --no-sync python tools/compare_tpc268_runs.py \
-  "$TPC_RUN_ROOT/species_baseline_seed42/val" "$TPC_RUN_ROOT/species_method_seed42/val" \
-  --output "$TPC_RUN_ROOT/M2_species_val_comparison.json"
-
-# R05/R06：仅 organ 主 caption，独立辅助文本仍只在训练时使用。
-train_run organ_baseline config/cfg_tpc268_organ_baseline.py 42
-eval_run  organ_baseline config/cfg_tpc268_organ_baseline.py 42 val
-train_run organ_method config/cfg_tpc268_organ_full.py 42
-eval_run  organ_method config/cfg_tpc268_organ_full.py 42 val
-uv run --no-sync python tools/compare_tpc268_runs.py \
-  "$TPC_RUN_ROOT/organ_baseline_seed42/val" "$TPC_RUN_ROOT/organ_method_seed42/val" \
-  --output "$TPC_RUN_ROOT/M2_organ_val_comparison.json"
-```
-
-预期：若辅助训练产生超出读取主 taxonomy 文本的收益，在 species 和尤其 organ 配对中仍应出现计数改进。不同 caption 的绝对 MAE 可以作输入比较，但方法增益必须分别计算同 caption 的 delta。若只有 R02/R01 有增益，应收窄结论为 taxonomy 条件下的计数收益；organ 配对即使成功，也只支持在器官文本/exemplar 条件下的定位计数改善，不能宣称 query 是纯视觉表示。
-
-### 3.4 第三阶段 M3：隔离监督与几何贡献（R07–R09）
-
-```bash
-# R07：只保留逐级对比，没有 TT/TV。
-train_run contrast config/cfg_tpc268_contrast.py 42
-eval_run  contrast config/cfg_tpc268_contrast.py 42 val
-# R08：只保留蕴涵；TT 含错误父节点负项，TV 当前仍只有正项。
-train_run entailment config/cfg_tpc268_entailment.py 42
-eval_run  entailment config/cfg_tpc268_entailment.py 42 val
-# R09：相同逐级对比 + TT/TV，换为合法域内的欧氏锥。
-train_run euclidean config/cfg_tpc268_euclidean.py 42
-eval_run  euclidean config/cfg_tpc268_euclidean.py 42 val
-uv run --no-sync python tools/compare_tpc268_runs.py \
-  "$TPC_RUN_ROOT/full_baseline_seed42/val" "$TPC_RUN_ROOT/full_method_seed42/val" \
-  "$TPC_RUN_ROOT/contrast_seed42/val" "$TPC_RUN_ROOT/entailment_seed42/val" \
-  "$TPC_RUN_ROOT/euclidean_seed42/val" --output "$TPC_RUN_ROOT/M3_val_comparison.json"
-```
-
-预期：若组合目标各有作用，full 相对两种单项应有额外计数收益；若 Lorentz 有独立价值，full 应优于 Euclidean。Euclidean 是当前的欧氏**锥**对照，不是复现任一论文的完整欧氏分类基线。若 contrast 与 full 相当，现有蕴涵项收益未被证明，优先选择更简单的 contrast 方法；若 Euclidean 与 Lorentz 相当，报告层级监督有效，但不主张双曲几何更好。entailment-only 必须同时检查错误父锥包含率，不能只据正边损失接近 0 判定树已学好。
-
-## 4. M4：多 seed、简化检查及最终 test
-
-首轮共 9 次正式训练。它们完成后先冻结判断标准和待复跑对照，再增加 seed，所有复跑仍从原 FSC147 权重初始化。
-
-### 4.1 必需的主结果稳定性（R10–R13，累计 13 次）
-
-```bash
-for seed in 43 44; do
-  train_run full_baseline config/cfg_tpc268_baseline.py "$seed"
-  eval_run  full_baseline config/cfg_tpc268_baseline.py "$seed" val
-  train_run full_method config/cfg_tpc268_full.py "$seed"
-  eval_run  full_method config/cfg_tpc268_full.py "$seed" val
-  uv run --no-sync python tools/compare_tpc268_runs.py \
-    "$TPC_RUN_ROOT/full_baseline_seed${seed}/val" "$TPC_RUN_ROOT/full_method_seed${seed}/val" \
-    --output "$TPC_RUN_ROOT/M4_full_seed${seed}_val.json"
-done
-```
-
-seed42/43/44 各自报告 MAE、RMSE、相对对应 baseline 的 delta，再报告 mean±sample std。`delta = method - baseline`，负值代表改善。主张需要配对增益方向一致、平均改善不被 seed 波动解释；只有一个 seed 好而另两个不支持时，报告不稳定。三个 seed 仍是小样本，不自动意味着统计显著；可以补充固定 checkpoint 的逐图配对 bootstrap，注明它不替代训练 seed 不确定性。
-
-### 4.2 结论决定的扩展
-
-如果保留“Lorentz 优于 Euclidean”的 C2，**必须**再跑 Euclidean seed43/44（累计 15 次）：
-
-```bash
-for seed in 43 44; do
-  train_run euclidean config/cfg_tpc268_euclidean.py "$seed"
-  eval_run  euclidean config/cfg_tpc268_euclidean.py "$seed" val
-  uv run --no-sync python tools/compare_tpc268_runs.py \
-    "$TPC_RUN_ROOT/full_baseline_seed${seed}/val" "$TPC_RUN_ROOT/full_method_seed${seed}/val" \
-    "$TPC_RUN_ROOT/euclidean_seed${seed}/val" --output "$TPC_RUN_ROOT/M4_geometry_seed${seed}_val.json"
-done
-```
-
-如果保留“无需主 caption 的 taxonomy/species 名称仍有收益”的强 C1，**必须**增加 organ 配对 seed43/44（累计 19 次，包括上项）：
-
-```bash
-for seed in 43 44; do
-  train_run organ_baseline config/cfg_tpc268_organ_baseline.py "$seed"
-  eval_run  organ_baseline config/cfg_tpc268_organ_baseline.py "$seed" val
-  train_run organ_method config/cfg_tpc268_organ_full.py "$seed"
-  eval_run  organ_method config/cfg_tpc268_organ_full.py "$seed" val
-  uv run --no-sync python tools/compare_tpc268_runs.py \
-    "$TPC_RUN_ROOT/organ_baseline_seed${seed}/val" "$TPC_RUN_ROOT/organ_method_seed${seed}/val" \
-    --output "$TPC_RUN_ROOT/M4_organ_seed${seed}_val.json"
-done
-```
-
-可选附录的简化检查（首轮仅一个 seed，若成为主结论再复跑）：关闭 species→unit bridge 的 TT 项，检查这个任务假设是否必要。其他配置不变，TV 仍存在，因此这是 **TT bridge 删除**，不是删除所有计数单元关系。
-
-```bash
-train_run no_tt_bridge config/cfg_tpc268_full.py 42 bridge_weight=0.0
-eval_run  no_tt_bridge config/cfg_tpc268_full.py 42 val
-uv run --no-sync python tools/compare_tpc268_runs.py \
-  "$TPC_RUN_ROOT/full_baseline_seed42/val" "$TPC_RUN_ROOT/full_method_seed42/val" \
-  "$TPC_RUN_ROOT/no_tt_bridge_seed42/val" --output "$TPC_RUN_ROOT/optional_bridge_val.json"
-```
-
-不在本轮增加 BERT 解冻、LoRA、更多视觉头或新数据集；它们会扩大研究范围。若以后尝试解冻，须加入同等解冻的 CountGD baseline。
-
-### 4.3 最终 test：方法与阈值冻结后执行
-
-选 checkpoint 的唯一依据是该 run 的 val MAE。不得通过 test 选择 epoch、seed、lambda 或 threshold。以下评估首轮 9 个方法，形成完整 test 主表/消融表；如果预算只保留部分方法，至少保留全部主张需要的配对基线，并在 tracker 说明未执行项。
-
-```bash
-for spec in \
-  'full_baseline cfg_tpc268_baseline' 'full_method cfg_tpc268_full' \
-  'species_baseline cfg_tpc268_species' 'species_method cfg_tpc268_species_full' \
-  'organ_baseline cfg_tpc268_organ_baseline' 'organ_method cfg_tpc268_organ_full' \
-  'contrast cfg_tpc268_contrast' 'entailment cfg_tpc268_entailment' \
-  'euclidean cfg_tpc268_euclidean'; do
-  read -r run_id cfg_name <<< "$spec"
-  eval_run "$run_id" "config/${cfg_name}.py" 42 test
-done
-uv run --no-sync python tools/compare_tpc268_runs.py \
-  "$TPC_RUN_ROOT/full_baseline_seed42/test" "$TPC_RUN_ROOT/full_method_seed42/test" \
-  "$TPC_RUN_ROOT/species_baseline_seed42/test" "$TPC_RUN_ROOT/species_method_seed42/test" \
-  "$TPC_RUN_ROOT/organ_baseline_seed42/test" "$TPC_RUN_ROOT/organ_method_seed42/test" \
-  "$TPC_RUN_ROOT/contrast_seed42/test" "$TPC_RUN_ROOT/entailment_seed42/test" \
-  "$TPC_RUN_ROOT/euclidean_seed42/test" --split test --output "$TPC_RUN_ROOT/final_seed42_test.json"
-for seed in 43 44; do
-  eval_run full_baseline config/cfg_tpc268_baseline.py "$seed" test
-  eval_run full_method config/cfg_tpc268_full.py "$seed" test
-  uv run --no-sync python tools/compare_tpc268_runs.py \
-    "$TPC_RUN_ROOT/full_baseline_seed${seed}/test" "$TPC_RUN_ROOT/full_method_seed${seed}/test" \
-    --split test --output "$TPC_RUN_ROOT/final_full_seed${seed}_test.json"
-done
-```
-
-执行了 Euclidean、organ 扩展时，用同一个 `eval_run ... test` 重评各 seed，并带对应 seed 的 baseline 交给比较工具。报告所有预先指定 seed，不从 test 挑最佳 seed。测试结果为 2000 张；val 为 999 张。每个目录保存 `*_counts.json`、`*_metrics.json` 与 console；比较工具重新计算计数误差并拒绝不同 caption、冻结策略、数据指纹、训练预算或推理协议的无配对比较。
-
-后续可以单独实现并验证官方 adaptive crop/SAM/exemplar correction 推理，但须为对应 baseline 与 full 同时运行、单列协议与表。TPC-268 不能直接复用 FSC147 特定图像的纠错名单。本轮不把后处理结果混入整图训练改动的主比较。
-
-## 5. 五个实验块及结果判定
-
-| 实验块 | 数据/比较/设置 | 核心指标和预期 | 失败解释 | 表或图/优先级 |
-|---|---|---|---|---|
-| B1 主结果，C1 | 官方 train→val/test；R01/R02，同 full-taxonomy caption；30 epochs，seed42/43/44 | MAE 主指标、RMSE 次指标、R² 描述；配对改善稳定，同时报告每 seed | 辅助层级监督未改善计数；不得以辅助 loss 替代结论 | 主表；必需 |
-| B2 caption 控制，C1 | R03/R04、R05/R06；冻结和预算与 B1 相同；organ 强主张需三 seed | 各 caption 内 delta；预期 organ 配对仍改善才支持超出主分类文本的收益 | full 主文本有益，但辅助监督可能只适配已有分类条件 | 主表；首轮必需 |
-| B3 新意隔离，C2 | R02/R07/R08/R09 与 R01；相同训练数据/主 caption/辅助权重 | MAE/RMSE；TT 正/负包含率与定义域；geometry 主张需三 seed | 单项更简洁；或几何无独立价值，收窄 C2 | 消融表；首轮必需 |
-| B4 简化与稳定性，C1/C2 | 三 seed 配对；可选 no-TT-bridge；不引入新 encoder | 配对 delta mean±std、训练 step 时间/峰值显存、参数增量；bridge 删除无损则选更简单版本 | seed 不稳定则证据不足；bridge 非必需则不包装成关键贡献 | 主表误差条/附录；多 seed 必需，bridge 可选 |
-| B5 失败分析，C1 | 用已有逐图结果，不再训练；按 organ、GT数量区间、已见/未见 species、taxonomy是否解析分组 | 每组 n、MAE/RMSE、有符号误差、预测=900 比例；检查低/高密度和漏/过计数 | 平均值掩盖某类退化、未解析样本或密集图像上限问题 | 失败案例图与分组表；必需 |
-
-B5 固定 count 桶为 `[0,20)`、`[20,50)`、`[50,100)`、`[100,200)`、`[200,+∞)`，不要看结果后移动边界。示例图各取固定数量的最改善、最退化、预测达到上限和未解析 taxonomy 样本，同时保留原始逐图结果便于复核。这里的分组统计和三 seed 汇总尚无独立 CLI；服务器 Codex 可用一次性的 `uv run --no-sync python - <<'PY'` 读取真实 JSON、在 `runs/` 产出表，不能把辅助分类准确率当作计数分组结果。
-
-现有几何诊断在**训练 loss 日志**中，评估路径不编码辅助文本，因此不能声称 `val_metrics.json` 已测得未见节点的锥包含率。重点查看 `train_tax_tt_rank_<rank>_positive_inclusion_rate_unscaled`、`...negative_inclusion_rate_unscaled`、`...negative_margin_violation_rate_unscaled`、`train_tax_aperture_invalid_rate_unscaled`、`train_tax_query_rank_<rank>_positive/negative_inclusion_rate_unscaled`（实际可用 rank 和 pair 数以日志为准）。没有合法 pair 的层级，其 0 值不代表完美表现。
-
-预期非法锥率始终 0；正父包含率上升、错误父包含率下降、负 margin 违例下降，但没有预设必须达到 100%/0%。query 的正确/错误父包含率只是机制诊断，最终以 MAE/RMSE 判定。若训练几何良好而未见子集计数无增益，只支持训练表征被约束，不支持泛化主张。
-
-## 6. 预算、暂停条件与恢复
-
-| 阶段 | 正式训练数 | 继续条件 | 成本/风险 |
-|---|---:|---|---|
-| M0 环境、数据、GPU短程 | 0 | CUDA 算子、真实 optimizer、数据/crop/几何检查通过 | 四个短程各包含完整 val；实测显存/step时间 |
-| M1 主结果 | 2 | 技术协议一致、计数 JSON 完整；无数值异常 | baseline 与 full 的辅助文本开销不同，分别测时 |
-| M2 caption 控制 | +4 | 对照内主文本完全一致；记录正负结果 | caption 长度改变成本与条件信息 |
-| M3 消融 | +3，累计9 | 检查计数与锥指标，不只看 loss | entailment-only 视觉负项缺失，结论有限 |
-| M4 核心多seed | +4，累计13 | seed42/43/44全量报告 | 若 claim 扩展，加 Euclidean2 / organ4，累计19 |
-
-先用 M0 和 R01 的真实数据估预算，不凭 GPU 型号编造小时数。单 GPU、batch4、drop_last 时每 epoch 为 1749 个训练 batch 与 999 张 val，30 epochs 的近似 GPU 小时：`30 × (1749 × 每训练step秒数 + 999 × 每val图秒数) / 3600`，另加最终重评和预检查。full/organ/Euclidean 分别测量自己的 step 时间；多卡改变全局 batch，不能直接替换当前单卡协议。
-
-每 run 保存 latest、best 和第10/20/30 epoch checkpoint，约五份完整训练状态。先量 R01 的 checkpoint 实际大小，再按 runs 数估磁盘余量。不要自动删除 best、latest 或原始日志；可在完成归档后另行安排清理周期快照。
-
-技术异常时暂停依赖该异常的运行：缺文件、split重叠、非法 exemplar、NaN/Inf、非法锥、CUDA kernel错误、fingerprint不一致、缺计数结果、配置与checkpoint不匹配。修复后记录新代码提交/环境/协议是否变化；如变化影响对照，重新跑相应组。单纯 MAE 未改善不属于技术异常。
-
-断点续训：同一协议下重新执行同一个 `train_run`，自动读取 `checkpoint.pth` 与 optimizer/scheduler，保留历史最佳 val。若没有 latest 文件，会从原 FSC147 权重开始；执行前核对 tracker。旧协议 v1 的 checkpoint 不用于继续当前 `negative_parents_valid_cones_v2`。若希望重新从零初始化，用新 run ID，不能先删除检查点再悄悄重跑同一 ID。
-
-## 7. 交付与最终核对
-
-- [ ] M0 审计与 CUDA/optimizer 输出、git commit、lock 和输入 SHA256 保存完整。
-- [ ] R01–R09 完成或明确记录技术阻塞；best checkpoint 的 val 单独重评。
-- [ ] full-taxonomy、species、organ 各使用自己的匹配 baseline。
-- [ ] 核心结果 seed42/43/44；几何/organ 强主张按要求补齐配对 seed。
-- [ ] test 在方法/阈值冻结后执行；未使用 test 做调参或 checkpoint 选择。
-- [ ] 输出主表、消融表、mean±std、分组错误与固定规则选择的案例。
-- [ ] 区分训练几何诊断、条件 query 表征、真实计数泛化；报告 taxonomy 部分覆盖。
-- [ ] 对无收益结果保留原始记录并收窄主张，不追加未经对照的 BERT/LoRA 收益。
-- [ ] 数据/权重/`runs/` 保持 Git 忽略；本文及 `implement.md` 跟随 Git，同步服务器更新。
-
-本地 2026-10-12 曾完成旧数据协议的 CPU 前后向/几何 smoke；2026-10-14 已对当前代码完成有效 6998/999/2000 图的本地全量数据审计，仍须在 Ubuntu 核对 CUDA/实际训练。用户已确认服务器训练开始；具体任务及指标待真实日志回填。
-
-## 8. 执行追踪（持续更新）
-
-本表是待核实的**计划矩阵**，不是服务器运行监控。用户于 2026-10-14 告知实验已开始，尚未提供具体 run/log；先查服务器实际进程、commit、配置、output_dir，再把对应行的 `UNKNOWN` 改为 `RUNNING` 或 `DONE` 并附证据。旧数据协议与 `0c99a25` 当前协议分表/分目录记录，不混作同一对照。
-
-## 协议快照
-
-| 项目 | 固定值或待填信息 |
-|---|---|
-| 代码 commit | 见 `runs/tpc268_v2/preflight/git_commit.txt`，服务器执行时填写 |
-| Python / uv / PyTorch / CUDA / nvcc / GPU | M0 实测后填写，禁止猜测 |
-| 数据/权重/lock 指纹 | `preflight/input_sha256.json` 与数据审计；审计后另存最终版本 |
-| registry fingerprint | 当前审计：`cf080ec256b9f9595a0cd6110b30d80fa84da0d49799217054e682185d79d65d`；服务器核对 |
-| 数据 | 原始7000/1000/2000；当前有效6998/999/2000；部分层级覆盖 |
-| taxonomy覆盖 | train6545 / val943 / test1895 可解析；训练前固定 alias |
-| 训练 | 30 epochs，单GPU batch4，FP32，原 resize/crop；固定 backbone/BERT 冻结 |
-| 选择/评估 | best val MAE；整图、3 exemplar，threshold0.23，text_threshold0 |
-| seed | 首轮42，正式稳定性43/44 |
-
-状态只使用 UNKNOWN / TODO / RUNNING / DONE / FAILED / BLOCKED / SKIPPED。UNKNOWN 表示服务器状态未核实。每次开始记录时间、准确命令和输出目录；结束记录退出码、最佳 epoch（注明 0-based 或 1-based）、最佳 val MAE/RMSE、峰值显存、耗时。完成训练后重评 best 的 val，再填 DONE；test 在协议冻结后另填。
-
-## 必需运行
-
-| ID | 阶段/目的 | 配置或变体 | seed | 输出目录（根目录之下） | 状态 | best val MAE / RMSE | test MAE / RMSE |
-|---|---|---|---:|---|---|---|---|
-| S0 | 本地数据审计与历史 CPU smoke | 当前代码全量图片/坐标；旧协议 CPU 前后向 | — | 本地审计摘要见 `implement.md` | DONE | 不适用 | 不适用 |
-| S1 | M0 环境/算子/数据检查 | CUDA extension + dataset audit | — | preflight/ | UNKNOWN | — | — |
-| S2 | M0 GPU更新检查 | baseline/full/organ_full/euclidean，debug1epoch | 42 | preflight/gpu_* | UNKNOWN | 仅技术检查 | 不运行 |
-| R01 | M1 full-caption baseline | cfg_tpc268_baseline.py | 42 | full_baseline_seed42/ | UNKNOWN | — | — |
-| R02 | M1 主方法 | cfg_tpc268_full.py | 42 | full_method_seed42/ | UNKNOWN | — | — |
-| R03 | M2 species baseline | cfg_tpc268_species.py | 42 | species_baseline_seed42/ | UNKNOWN | — | — |
-| R04 | M2 species方法 | cfg_tpc268_species_full.py | 42 | species_method_seed42/ | UNKNOWN | — | — |
-| R05 | M2 organ baseline | cfg_tpc268_organ_baseline.py | 42 | organ_baseline_seed42/ | UNKNOWN | — | — |
-| R06 | M2 organ方法 | cfg_tpc268_organ_full.py | 42 | organ_method_seed42/ | UNKNOWN | — | — |
-| R07 | M3 对比监督消融 | cfg_tpc268_contrast.py | 42 | contrast_seed42/ | UNKNOWN | — | — |
-| R08 | M3 蕴涵监督消融 | cfg_tpc268_entailment.py | 42 | entailment_seed42/ | UNKNOWN | — | — |
-| R09 | M3 几何对照 | cfg_tpc268_euclidean.py | 42 | euclidean_seed42/ | UNKNOWN | — | — |
-| R10 | M4 基线复跑 | cfg_tpc268_baseline.py | 43 | full_baseline_seed43/ | UNKNOWN | — | — |
-| R11 | M4 方法复跑 | cfg_tpc268_full.py | 43 | full_method_seed43/ | UNKNOWN | — | — |
-| R12 | M4 基线复跑 | cfg_tpc268_baseline.py | 44 | full_baseline_seed44/ | UNKNOWN | — | — |
-| R13 | M4 方法复跑 | cfg_tpc268_full.py | 44 | full_method_seed44/ | UNKNOWN | — | — |
-
-## 根据结论范围追加
-
-| ID | 执行条件 | 配置/seed | 输出目录 | 状态 | 结果或跳过理由 |
-|---|---|---|---|---|---|
-| R14 | 保留 Lorentz 优势主张则必需 | cfg_tpc268_euclidean.py / 43 | euclidean_seed43/ | UNKNOWN | — |
-| R15 | 保留 Lorentz 优势主张则必需 | cfg_tpc268_euclidean.py / 44 | euclidean_seed44/ | UNKNOWN | — |
-| R16 | 保留 organ 下收益主张则必需 | cfg_tpc268_organ_baseline.py / 43 | organ_baseline_seed43/ | UNKNOWN | — |
-| R17 | 同上 | cfg_tpc268_organ_full.py / 43 | organ_method_seed43/ | UNKNOWN | — |
-| R18 | 同上 | cfg_tpc268_organ_baseline.py / 44 | organ_baseline_seed44/ | UNKNOWN | — |
-| R19 | 同上 | cfg_tpc268_organ_full.py / 44 | organ_method_seed44/ | UNKNOWN | — |
-| A01 | 附录可选：删除 TT bridge | cfg_tpc268_full.py / 42 / bridge_weight=0 | no_tt_bridge_seed42/ | UNKNOWN | — |
-
-## 每阶段记录模板
-
-复制下列记录并填真实值；不要把模板的破折号当作实验结果。
+完整目标为：
 
 ```text
-Run ID / 数据协议版本:
-状态:
-开始/结束时间（时区）:
-代码 commit / 三张排除图 / 坐标策略 / 环境 / 输入指纹:
-准确命令:
-输出目录 / console / log.txt:
-退出码 / 异常信息:
-实际训练完成 epochs / best epoch（注明索引）:
-最佳 checkpoint 路径 / 训练是否在旧版9df0651启动:
-重评 best val: images / MAE / RMSE / R2:
-配对 baseline / delta MAE / delta RMSE:
-训练几何诊断（pair数、正负包含率、非法域率、饱和率）:
-秒/step / 秒/val图 / 峰值显存 / checkpoint大小 / GPU小时:
-是否达到下一阶段技术门槛:
-协议变更与重跑范围:
-最终 test（仅冻结协议后）:
+L_total = L_CountGD + w(step) * [0.1 L_contrast + 0.05 L_TT + 0.05 L_TV]
 ```
 
-## 结果交付
+`w(step)`在第一epoch从0线性升至1；三项只加在最终层，不复制到原Decoder辅助层/encoder loss。
 
-- [ ] M1/M2/M3 验证对照 JSON，所有最终目录均为 best checkpoint 重评。
-- [ ] 三 seed 的各自 MAE/RMSE 和配对 delta、mean±sample std，不挑 seed。
-- [ ] test 主表/消融表；测试指标不是训练日志里的 `test_mae`。
-- [ ] 逐 organ、数量桶、已见/未见 species、taxonomy 是否解析的 n 与计数误差。
-- [ ] 改善/退化/预测900/未解析样本的固定规则选图。
-- [ ] C1/C2：支持、部分支持、不支持或证据不足，说明结论边界。
+| 项目 | 实现 | 边界 |
+|---|---|---|
+| 分层对比 | 同rank的query↔text cosine对比，train-only负节点，每层最多补16个 | R07只启用该项；不使用Lorentz TT/TV约束 |
+| TT蕴涵 | taxonomy相邻正确父子边、错误父节点负项、species→species-organ任务bridge | bridge不是第八级生物分类 |
+| TV蕴涵 | 正确计数单位文本→匹配对象query的正蕴涵 | 当前没有额外TV负蕴涵loss；错误父query包含率仅为诊断 |
+| Lorentz几何 | 128维space表示，固定曲率参数c=1（曲率−1），合法半径映射、可学习文本/视觉尺度；float32几何 | 候选负父节点最多16个、margin0.1、negative weight1；合法锥率不等于计数收益 |
 
-## 文档维护记录
+独立taxonomy文本分支仅在训练时使用；评估跳过该分支，但保留该run对应的主caption与视觉exemplars。最终query始终是图像+提示条件表征，不能把辅助指标称作纯视觉分类性能。
 
-- 2026-10-14：把旧计划与 tracker 合并，按照 `0c99a25` 更新三张排除图、有效样本数、坐标审计和 uv 源配置；服务器实际运行状态与指标未知。实现协议变化已同步写入 `implement.md`。后续每次工作同时更新两份文档。
+## 3. 输入是什么：主文本模板与辅助文本
+
+所有训练输入为整图（经增强）、0–3个变换后exemplar及单目标主caption；GT点与taxonomy metadata用于训练监督。验证/test固定3个原始exemplar及resize后的整图；GT计数用于算指标，不用于预测数量校正。主caption由已提供的物种/器官/分类metadata构造，模型不是先自行识别物种再生成该文本。
+
+| 模式 | 主caption模板 | 使用实验 |
+|---|---|---|
+| `full_taxonomy` | `{organ} of {species}; taxonomy: {Kingdom}, {Phylum}, {Class}, {Order}, {Family}, {Genus}, {Species} .` | R01/R02/R07，计划R08/R09 |
+| `species` | `{organ} of {species} .` | R03/R04 |
+| `organ` | `{organ} .` | R05，条件式R06 |
+
+从当前registry实际生成的同一物种示例：
+
+```text
+fruit of Abutilon indicum; taxonomy: Plantae, Tracheophyta, Magnoliopsida, Malvales, Malvaceae, Abutilon, Abutilon indicum .
+fruit of Abutilon indicum .
+fruit .
+```
+
+无法解析taxonomy的图像，full-taxonomy模式退回species模板，计数监督保留，无效辅助关系跳过。完整taxonomy并非所有图像都提供。器官模板仍是语义文本，**organ-only不是纯视觉CountGD**。
+
+辅助文本与主caption独立：第k级使用累计prefix `A biological taxon classified as {Kingdom}, ..., {rank_k_name}.`；蕴涵方案另编码计数单位文本 `{organ} belonging to {species}.`。例如`A biological taxon classified as Plantae, Tracheophyta.`与`fruit belonging to Abutilon indicum.`。它们是训练目标的节点文本，不会被当成多个待计数类别，也不是eval阶段的额外GT预测校正。
+
+## 4. 实验矩阵与公共设置
+
+| ID | 主文本模式 | 新增辅助目标 | 配置文件 | 配对基线 |
+|---|---|---|---|---|
+| R01 | full_taxonomy | 无 | `cfg_tpc268_baseline.py` | 自身 |
+| R02 | full_taxonomy | contrast + Lorentz TT/TV | `cfg_tpc268_full.py` | R01 |
+| R03 | species | 无 | `cfg_tpc268_species.py` | 自身 |
+| R04 | species | contrast + Lorentz TT/TV | `cfg_tpc268_species_full.py` | R03 |
+| R05 | organ | 无 | `cfg_tpc268_organ_baseline.py` | 自身 |
+| R06 | organ | contrast + Lorentz TT/TV | `cfg_tpc268_organ_full.py` | R05 |
+| R07 | full_taxonomy | contrast-only，权重0.1 | `cfg_tpc268_contrast.py` | R01 |
+| R08 | full_taxonomy | Lorentz TT/TV-only，权重0.05/0.05 | `cfg_tpc268_entailment.py` | R01 |
+| R09 | full_taxonomy | contrast + Euclidean TT/TV | `cfg_tpc268_euclidean.py` | R01；几何配对R02 |
+
+| 公共项目 | 实际设置 |
+|---|---|
+| 初始化 | 每组独立从`checkpoints/checkpoint_fsc147_best.pth`开始；不从其他TPC微调权重初始化 |
+| 语言权重 | `checkpoints/bert-base-uncased` |
+| 随机种子 / 预算 | seed42，单GPU，30epochs，FP32，不启用AMP |
+| batch / steps | train batch4、drop_last；每完整epoch1749个训练batch；eval实际batch1 |
+| 优化 | AdamW；基础LR1e-4、weight decay1e-4、clip0.1；StepLR每10epoch衰减 |
+| 冻结 | `backbone.0`和`bert`；900queries，DN实际为0 |
+| 训练增强 | 原CountGD flip + 两路resize/crop，最终短边480–800、长边≤1333；crop同步点和exemplar，按batch最少exemplar统一shot |
+| 验证/test | 短边800、长边≤1333、3exemplars、整图计数，box/text threshold=0.23/0 |
+| 后处理 | 不使用adaptive crop、SAM、exemplar correction |
+| 模型选择 | 只按val MAE选best，RMSE/R²报告同一权重的结果；不用test挑epoch/seed/阈值 |
+
+原始split为7000/1000/2000；代码层面统一排除以下三张图，有效**6998/999/2000**，原图片、标注和split文件不修改：
+
+- train：`Malus_domestica/fruit/Malus_domestica_fruit_1.jpg`；
+- train：`Musa_sapientum/fruit/Musa_sapientum_fruit_45.jpg`；
+- val：`Punica_granatum/fruit/Punica_granatum_fruit_17.jpg`；test没有排除图。
+
+坐标策略=`strict_points_clip_exemplars_v1`：计数点必须有效且在原图内；exemplar ROI与图像取正面积交集，保留全部有效GT。有效taxonomy覆盖train6545/6998、val943/999、test1895/2000；registry fingerprint=`cf080ec256b9f9595a0cd6110b30d80fa84da0d49799217054e682185d79d65d`。原始269个species-organ单元保留；split物种仍有交集，不能统称完全未见物种划分。
+
+## 5. 实验状态与最佳权重轮次
+
+所有轮次均为**1-based**；日志`epoch=0`是第1轮。RUNNING取本次采集时刻，正式`log.txt`一行代表完成一轮训练与验证。R07的外层console包含短程输出，正式进度/结果只读取正式目录`log.log`/`log.txt`及checkpoint。
+
+| ID | 训练GPU | 状态 | 完整轮数与最新训练位置 | 最佳权重轮次 |
+|---|---:|---|---|---|
+| R01 | 0 | DONE | 30/30，训练及best-val重评结束 | 第2轮（checkpoint元数据已核对） |
+| R02 | 2 | DONE | 30/30，训练及best-val重评结束 | 第3轮（checkpoint元数据已核对） |
+| R03 | 3 | DONE | 30/30，训练及best-val重评结束 | 第12轮（checkpoint元数据已核对） |
+| R04 | 3 | DONE | 30/30，10月17日07:13:21结束，best-val重评完成，退出码0 | 第11轮，未刷新（checkpoint已核对） |
+| R05 | 0 | DONE | 30/30，10月17日01:50:16结束，best-val重评完成，退出码0 | 第12轮，未刷新（checkpoint已核对） |
+| R07 | 2 | RUNNING | 完成21/30；第22轮，batch 1480/1749（10月17日约11:26） | 第16轮，已刷新（checkpoint已核对） |
+| R06 | — | BLOCKED | 未启动，等待计划门槛 | — |
+| R08 | 0（准备分配） | READY | 用户明确要求先启动，run_r08.sh已准备；本次未执行 | — |
+| R09 | — | BLOCKED | 未启动，等待计划门槛 | — |
+
+DONE表示训练与best-val重评结束；test是否完成见第7节，二者不混用。R01–R05退出码均为0。R07只完成部分预算，当前不能作最终结论。宿主机只显示GPU0/1/2/3，10月17日11:26空闲为0和3；不存在index4，避免混淆物理编号与第几张卡。
+
+## 6. 验证集性能
+
+**指标全部对应各自val MAE最低的同一个权重；RMSE不是另挑最低轮次。** MAE越低越好；RMSE更重罚大错误；R²相对该集合均值预测基线计算，不是准确率。999张val与2000张test数量分布不同，R²不作跨split直接比较。
+
+| ID | 最佳轮次 | 图像数 | MAE ↓ | RMSE ↓ | R² ↑ | 证据状态 |
+|---|---:|---:|---:|---:|---:|---|
+| R01 | 2 | 999 | 10.0030 | 26.4758 | 0.9388 | best权重独立重评完成 |
+| R02 | 3 | 999 | 10.6867 | 29.0248 | 0.9264 | best权重独立重评完成 |
+| R03 | 12 | 999 | 9.6707 | 28.6010 | 0.9286 | best权重独立重评完成 |
+| R04 | 11 | 999 | 10.7818 | 32.4995 | 0.9078 | 最终best权重独立重评完成 |
+| R05 | 12 | 999 | 10.4765 | 30.3528 | 0.9196 | 最终best权重独立重评完成 |
+| R07 | 16 | 999 | 11.0701 | 36.0906 | 0.8863 | 阶段性正式训练日志；best checkpoint已核对 |
+| R06/R08/R09 | — | — | — | — | — | 尚未启动 |
+
+R01–R05的训练best日志、checkpoint的epoch/best_val_mae与独立重评一致；R04/R05最终999张best-val逐图MAE/RMSE/R²已重新计算核验。R07短程约15步技术检查不能混入正式实验表；当前best来自正式第16轮。
+
+历史记录：2026-10-16约15:39核对R04/R05/R07的best快照为第11/12/1轮，checkpoint的best_val_mae均与正式log.txt对应轮次一致。R07当时第2–4轮MAE分别为13.7167、14.2322、13.2993；10月17日已更新为第16轮。
+
+## 7. 测试集性能
+
+均用**验证集选出的best权重**，完整test2000张，没有排除任何test图片。R01/R03于2026-10-15、R02于2026-10-16由用户明确要求评估；不根据test重新选权重或改阈值。
+
+| ID | 使用权重轮次 | 图像数 | MAE ↓ | RMSE ↓ | R² ↑ | 状态 |
+|---|---:|---:|---:|---:|---:|---|
+| R01 | 2 | 2000 | 12.6490 | 36.6432 | 0.7947 | DONE，退出码0 |
+| R02 | 3 | 2000 | 12.3755 | 37.9426 | 0.7799 | DONE，退出码0 |
+| R03 | 12 | 2000 | 12.5750 | 37.7194 | 0.7824 | DONE，退出码0 |
+| R04 | 11 | 2000 | 13.6800 | 36.0976 | 0.8008 | DONE；快照SHA256与最终best完全一致 |
+| R05 | 12 | 2000 | 10.5470 | 29.8706 | 0.8636 | DONE；快照SHA256与最终best完全一致 |
+| R07旧快照 | 1 | 2000 | 13.3415 | 36.7346 | 0.7937 | DONE；仅对应第1轮，当前第16轮best未测test |
+| R06/R08/R09 | — | — | — | — | — | 尚未启动，未评估 |
+
+R01/R02/R03共六份val/test结果已从逐图计数JSON独立重算MAE、RMSE、R²，与metrics文件一致，无重复图片；此前test核验图片集合与官方test一致、GT等于原annotation点数。
+
+| ID | test GPU | 时间（Asia/Shanghai） | 退出码 | 说明 |
+|---|---:|---|---:|---|
+| R01 | 0 | 2026-10-15 18:59:54–19:07:20 | 0 | 完整2000图 |
+| R02 | 1 | 2026-10-16 10:29:53–10:40:55 | 0 | 与其他任务共享GPU，峰值显存1584MiB |
+| R03 | 3 | 2026-10-15 17:26:54–17:33:34 | 0 | 完整2000图 |
+| R04 | 3 | 2026-10-16 15:40:32–15:50:52 | 0 | 部分训练预算best快照，完整2000图 |
+| R05 | 0 | 2026-10-16 15:40:32–15:51:14 | 0 | 部分训练预算best快照，完整2000图 |
+| R07 | 2 | 2026-10-16 15:40:32–15:52:43 | 0 | 部分训练预算best快照，完整2000图 |
+
+2026-10-16阶段性test：按用户明确要求，15:40:32在GPU3/0/2并行评估R04/R05/R07当时val选出的best（第11/12/1轮），训练继续运行。启动前GPU剩余显存约12.7/6.9/7.2GiB（GPU0/2/3），此前同协议eval峰值约1.6GiB。每项输出单独保存为`<run>/test_snapshot_20261016_153930/`；使用复制并读取验证过的`checkpoint_best_snapshot.pth`，保存SHA256、快照时间/epoch/val指标、config及工作区代码diff，避免训练刷新best改变评估对象。后台进程使用独立session，日志/status/exitcode留在输出目录，不依赖SSH。清单见[parallel_test_snapshot_20261016_153930.json](../runs/tpc268_v3_exclude3/planning/parallel_test_snapshot_20261016_153930.json)。这些结果属于当前部分训练预算的快照，不替代最终30轮模型；不使用test挑epoch、阈值或后续参数。推理沿用原caption、3exemplars、整图、阈值0.23/0及2000张test；仅设置CPU线程数为2以控制并行资源占用。
+
+15:53核验通过：三个快照的SHA256未改变；逐图路径各有2000张且唯一，与官方test清单一致；每张GT与原annotation点数一致；MAE/RMSE/R²均独立重算吻合。核验及配对结果见[verified_test_snapshot_20261016_153930.json](../runs/tpc268_v3_exclude3/planning/verified_test_snapshot_20261016_153930.json)。PyTorch峰值allocated为R04/R05/R07=1584/1583/1584MiB，nvidia-smi进程占用约3004MiB，各卡仍有余量；完成后测试进程释放显存，原GPU0/2/3训练进程仍在。没有修改正在运行的训练配置或数据。
+
+## 8. 实验结果分析
+
+### 8.1 同文本的辅助训练配对
+
+`Δ=method−同caption baseline`，负的MAE/RMSE差值为改善。
+
+| 配对 | split | ΔMAE | ΔRMSE | ΔR² | 当前解释 |
+| R02−R01 | val | +0.6837 | +2.5490 | -0.0124 | 验证三指标均退化，当前组合未获收益 |
+| R02−R01 | test | -0.2735 | +1.2994 | -0.0148 | MAE改善、RMSE/R²退化，存在取舍 |
+| R04−R03 | val | +1.1111 | +3.8985 | -0.0208 | 完成同30轮预算；单seed验证三指标均退化 |
+| R04−R03 | test | +1.1050 | -1.6218 | +0.0183 | 最终同权重：MAE退化、RMSE/R²改善 |
+| R07−R01 | val | +1.0671 | +9.6148 | -0.0525 | 第16轮best，R07训练未完成 |
+| R07快照−R01 | test | +0.6925 | +0.0914 | -0.0010 | 阶段性快照：三指标均未优于R01；训练未完成 |
+
+- **R02：结论需同时保留正负证据。** val MAE升高约6.8%，test MAE降低约2.16%，但test RMSE升高约3.55%、R²降低。不能将它概括为全面有效或全面无效；更不能把组合结果分别归因为contrast和Lorentz。test差异仅用于报告，不反向驱动后续方案选择。
+- **R04：同预算单seed未获得MAE收益。** 完成30轮后best-val MAE=10.7818，对应R03=9.6707；test MAE变差但RMSE/R²改善，需保留指标取舍，不能将组合结果分别归因于contrast或Lorentz。
+- **R05：缺少配对辅助方案。** 最终organ-only best-val MAE=10.4765，test MAE=10.5470；R06尚未启动，不能判断organ条件下辅助训练是否有效。
+- **R07：当前阶段尚未优于R01。** 完成21/30轮，第16轮best-val MAE=11.0701，对应R01=10.0030；需按原预算继续并重评，旧第1轮test不能替代当前best。
+
+10月16日test快照的解释：R04相对同species文本R03的test MAE升高1.1050，但RMSE降低1.6218，反映指标取舍（逐图绝对误差697张改善、756张变差、547张相同）。R07旧第1轮相对同full-taxonomy文本R01的MAE升高0.6925、RMSE升高0.0914（531张改善、1064张变差、405张相同）。比较工具已核对相同数据/初始化/配置训练预算和推理协议；在10月16日测试时方法尚未完成30轮，原报告将其标为阶段性。10月17日R04完成30轮且最终best SHA与该快照相同，R04比较现已对应最终同预算选定权重；R07仍在训练且best已改变，其旧test保持历史阶段性身份。R05在这三组已测权重中MAE/RMSE最低，但caption不同且没有已完成R06配对，不能据此单独证明文本信息越少越好或辅助方案无效。后续选择仍只根据val，不因已查看test调整方案。
+
+### 8.2 主文本与早期最佳现象
+
+R03的best-val MAE=9.6707略低于full-taxonomy基线R01的10.0030，但RMSE分别为28.6010与26.4758；test MAE分别12.5750与12.6490，RMSE分别37.7194与36.6432。不能据此宣称更长的taxonomy文本更好，也不能把跨caption差异算成层级辅助训练收益。当前没有真正visual-only对照，无法隔离全部文本输入的贡献，也没有严格复现TPC论文的CountGD配方。
+
+| 已完成实验 | 最佳轮次 | best-val MAE / RMSE | 第30轮val MAE / RMSE |
+| R01 | 2 | 10.0030 / 26.4758 | 10.7017 / 35.3798 |
+| R02 | 3 | 10.6867 / 29.0248 | 11.6687 / 38.5785 |
+| R03 | 12 | 9.6707 / 28.6010 | 9.9129 / 31.2750 |
+
+后期train loss下降但val未刷新best，与泛化停滞/退化相符；这不是“再增加epoch就会改善”的证据。也不足以确定失败机制是梯度冲突、辅助权重过强或双曲几何本身；这些目前都是待验证假设。
+
+### 8.3 结论强度与剩余证据
+
+只有seed42，不能主张稳定收益、统计显著、统计等效或所有条件下无效。各caption配对和单项诊断尚未全部完成；多seed、Euclidean几何对照及更细粒度密度/器官分组分析仍待条件满足后执行。合法锥率0、辅助loss下降只说明已记录的数值/机制检查，不能替代计数指标或证明实现无缺陷。
+
+![各caption内的逐轮val MAE](../runs/tpc268_v3_exclude3/planning/val_mae_curves_20261016.png)
+
+图中每点为一轮完整验证；三个panel按主caption分开，未作平滑或补点。R07尚无正式epoch点，未画入；此图仅对应本次报告快照。
+
+## 9. 代码、环境、产物与可追溯性
+
+当前环境实测：Python3.10.12、torch2.13.0+cu130、torchvision0.28.0+cu130、transformers4.57.6、timm1.0.28；GPU为RTX3090。CUDA扩展曾用GCC11及虚拟环境CUDA13编译器构建，六项forward/gradcheck通过。当前系统默认nvcc可能与该构建环境不同，不用nvidia-smi版本代替编译器版本。维持现有uv环境，不在训练中途sync移除额外扩展。
+
+**启动Git记录与实际协议必须分开。** console包含训练和后续重评多个Git行，下表只取第一次训练启动记录，而非最后一行：
+
+| 实验 | 首次训练记录的HEAD | 工作区 | 解释 |
+| R01 | `9df0651` | has uncommited changes | 以保存的配置/checkpoint及已有源码快照共同复核 |
+| R02 | `9df0651` | has uncommited changes | 以保存的配置/checkpoint及已有源码快照共同复核 |
+| R03 | `9df0651` | has uncommited changes | 以保存的配置/checkpoint及已有源码快照共同复核 |
+| R04 | `8a26e86` | has uncommited changes | 以保存的配置/checkpoint及已有源码快照共同复核 |
+| R05 | `8a26e86` | has uncommited changes | 以保存的配置/checkpoint及已有源码快照共同复核 |
+| R07 | `8a26e86` | has uncommited changes | 以保存的配置/checkpoint及已有源码快照共同复核 |
+
+R01/R02/R03在`9df0651`且dirty的工作区启动，不代表它们用了未排除三图的旧数据协议；实际保存配置和checkpoint均记录了三张排除名单、当前坐标策略和有效registry fingerprint。本次已核对这些字段，但缺乏每次启动的完整不可变源码归档，不能仅凭HEAD声称逐字节复现。当前`8a26e86`也有工作区改动：transformer.py将禁用autocast的旧API替换为`torch.amp.autocast('cuda', enabled=False)`；该语义兼容改动已为R02 test单独存diff，本次不修改它。
+
+| ID | 相对实验根目录的run | 准确启动脚本 | 主要证据 |
+| R01 | `full_baseline_seed42/` | `run_r01.sh` | `full_baseline_seed42/config_args_all.json`、`log.txt`、`console.txt`、`checkpoint_best_regular.pth`（若已生成） |
+| R02 | `full_method_seed42/` | `run_r02.sh` | `full_method_seed42/config_args_all.json`、`log.txt`、`console.txt`、`checkpoint_best_regular.pth`（若已生成） |
+| R03 | `species_baseline_seed42/` | `run_r03.sh` | `species_baseline_seed42/config_args_all.json`、`log.txt`、`console.txt`、`checkpoint_best_regular.pth`（若已生成） |
+| R04 | `species_method_seed42/` | `run_r04.sh` | `species_method_seed42/config_args_all.json`、`log.txt`、`console.txt`、`checkpoint_best_regular.pth`（若已生成） |
+| R05 | `organ_baseline_seed42/` | `run_r05.sh` | `organ_baseline_seed42/config_args_all.json`、`log.txt`、`console.txt`、`checkpoint_best_regular.pth`（若已生成） |
+| R07 | `contrast_seed42/` | `run_r07.sh` | `contrast_seed42/config_args_all.json`、`log.txt`、`console.txt`、`checkpoint_best_regular.pth`（若已生成） |
+
+- 最佳checkpoint：`<run>/checkpoint_best_regular.pth`；latest：`<run>/checkpoint.pth`。训练根目录`val_metrics.json`通常是末轮，**最终比较只使用`<run>/val/val_metrics.json`**。本报告运行中best取训练日志并核对best checkpoint，而不把根目录末轮指标冒充best。
+- 独立重评：`<run>/val/val_metrics.json`、`val_counts.json`；test：`<run>/test/test_metrics.json`、`test_counts.json`、`checkpoint.sha256`、`run_test.sh`、`status`/`exitcode`。R01/R02配对test比较在`R01_R02_test_comparison.json`。
+- 本次原始快照：`planning/report_snapshot_20261016.json`；曲线：`planning/val_mae_curves_20261016.png`。整理前文档备份：`planning/experiment_before_report_20261016.md`。这些均在runs下，docs恰好保留两份文档。
+- R07短程证据为`preflight/gpu_contrast_only/`，正式为`contrast_seed42/`，两者不同初始化和预算，不混合统计。既有M0四组摘要为`preflight/summary.json`，不作为正式成绩。
+
+### 已完成结果快速入口
+
+| 实验 | 最佳权重验证指标 | 测试指标 | 逐图测试预测 |
+|---|---|---|---|
+| R01 | [val_metrics.json](../runs/tpc268_v3_exclude3/full_baseline_seed42/val/val_metrics.json) | [test_metrics.json](../runs/tpc268_v3_exclude3/full_baseline_seed42/test/test_metrics.json) | [test_counts.json](../runs/tpc268_v3_exclude3/full_baseline_seed42/test/test_counts.json) |
+| R02 | [val_metrics.json](../runs/tpc268_v3_exclude3/full_method_seed42/val/val_metrics.json) | [test_metrics.json](../runs/tpc268_v3_exclude3/full_method_seed42/test/test_metrics.json) | [test_counts.json](../runs/tpc268_v3_exclude3/full_method_seed42/test/test_counts.json) |
+| R03 | [val_metrics.json](../runs/tpc268_v3_exclude3/species_baseline_seed42/val/val_metrics.json) | [test_metrics.json](../runs/tpc268_v3_exclude3/species_baseline_seed42/test/test_metrics.json) | [test_counts.json](../runs/tpc268_v3_exclude3/species_baseline_seed42/test/test_counts.json) |
+| R04最终best | [val_metrics.json](../runs/tpc268_v3_exclude3/species_method_seed42/val/val_metrics.json) | [test_metrics.json](../runs/tpc268_v3_exclude3/species_method_seed42/test_snapshot_20261016_153930/test_metrics.json) | [test_counts.json](../runs/tpc268_v3_exclude3/species_method_seed42/test_snapshot_20261016_153930/test_counts.json) |
+| R05最终best | [val_metrics.json](../runs/tpc268_v3_exclude3/organ_baseline_seed42/val/val_metrics.json) | [test_metrics.json](../runs/tpc268_v3_exclude3/organ_baseline_seed42/test_snapshot_20261016_153930/test_metrics.json) | [test_counts.json](../runs/tpc268_v3_exclude3/organ_baseline_seed42/test_snapshot_20261016_153930/test_counts.json) |
+| R07快照 | 第1轮正式训练val日志及snapshot_metadata.json | [test_metrics.json](../runs/tpc268_v3_exclude3/contrast_seed42/test_snapshot_20261016_153930/test_metrics.json) | [test_counts.json](../runs/tpc268_v3_exclude3/contrast_seed42/test_snapshot_20261016_153930/test_counts.json) |
+
+## 10. 后续持续更新规则
+
+本文件采用“前半部当前报告＋后半部批准的计划”，下一次实验状态变化时更新同一组表，避免在末尾累积互相矛盾的旧状态。**这不是已部署的自动刷新服务**；每次后续实验工作都需从真实日志/产物刷新本报告，并同步implement.md的日期记录。
+
+1. 更新采集时刻、当前HEAD/工作区差异；核对status、进程与GPU，RUNNING状态文件本身不能证明进程仍活着。
+2. 读取正式训练目录的log.txt，记录完整轮数与log.log最新batch；R07先区分短程/正式阶段。最佳按val MAE选，保留同一epoch的RMSE/R²，不分别挑各列最优。
+3. 核对best checkpoint的epoch（转换为1-based）及best_val_mae；若正在写checkpoint导致读取失败，稍后重读，不能改checkpoint来绕过。
+4. 训练结束后确认退出码0并重评best-val；独立重评通过才把阶段性val改成最终val。评估test只在用户要求或冻结计划的评估阶段执行，不因尚缺结果擅自补跑。
+5. 更新对应val/test表和同caption配对差值；逐图检查图片数、去重、官方split与GT一致，重算MAE/RMSE/R²，核对training_protocol。没有产物填“未评估”，不填0。
+6. 重画未平滑曲线、更新snapshot文件及持续记录。报告所有已执行seed和失败/未运行项，不挑选有利结果，不使用已查看test调整后续参数。
+7. 遵守原始资产不修改、已启动实验不变和同协议baseline配对；模型/输入/标签/环境变化另开协议目录和匹配baseline。docs只保留experiment.md与implement.md。
+
+### 本次维护记录（2026-10-16）
+
+整理R01–R09设置矩阵、实际文本模板、状态/最佳epoch/完整val与test表、同caption分析、代码与产物证据及更新流程。R01/R02/R03六份重评结果已独立重算，R01–R05的best checkpoint轮次已核对；现有训练与配置未变，未启动新实验或额外test。下附既有计划，保留R08优先级和R06/R09/多seed的门槛。
+
+15:39–15:53追加维护：用户明确要求并行测试R04/R05/R07当前best。三项固定快照测试与核验均完成，实测结果、epoch/GPU/时间、不可变权重证据、逐图产物及阶段性配对分析已写回第1/5/6/7/8/9节；训练继续运行，原计划不因test改动。曲线文件仍为11:00的历史快照，本次进度与结果以更新后的表和新增核验JSON为准。
+
+### 2026-10-17维护记录
+
+核对R04/R05退出码、30轮日志、最终best元数据和999图独立重评，重算val指标并确认最终best与既有test快照SHA256一致；核对R07当前第16轮best和21轮完成进度。采集原始状态/逐epoch日志见[report_snapshot_20261017.json](../runs/tpc268_v3_exclude3/planning/report_snapshot_20261017.json)，更新的未平滑曲线见[val_mae_curves_20261017.png](../runs/tpc268_v3_exclude3/planning/val_mae_curves_20261017.png)。按用户要求优先论文基线核验，记录初始化等公开信息缺项；未启动新训练，未修改已有实现、配置、数据或进程。
+
+## 附录 A：后续实验计划与命令（2026-10-17优先级修订）
+
+**2026-10-17优先级补充：用户随后明确要求先提供R08启动命令。** 本次已准备原计划R08的GPU0后台脚本，READY但未执行；R07继续原训练，R06/R09仍不自动展开。P01论文Table 4“3 visual exemplars＋full taxonomy”的初始化和监督配方缺项继续保留，P01训练尚未启动，不能把R08或猜测配置称作论文完全复现。
+
+核查来源：[论文§4.5与Table 4](https://arxiv.org/html/2603.21229v1#S4.SS5)、[官方仓库](https://github.com/tiny-smart/TPC-268)、[项目页](https://tiny-smart.github.io/tpc268-project-page/)、[公开权重请求Issue #3](https://github.com/tiny-smart/TPC-268/issues/3)。论文确认重新训练、3个视觉exemplars，主文本格式为七级名称逗号序列`Kingdom, Phylum, Class, Order, Family, Genus, Species.`；对应test为MAE=16.90/RMSE=43.32/R²=0.71，未单独报告该设置的val。**论文未说明从FSC147 CountGD权重微调还是GroundingDINO初始化**；“retrain”不能推出具体初始化，更不代表随机初始化全部网络。
+
+当前R01文本为`organ of species; taxonomy: ... .`，从checkpoint_fsc147_best.pth初始化，使用2px载体框/center-only监督、冻结backbone.0与BERT、30epoch及整图阈值0.23/0。这些是本地协议，不是已验证的作者配方。除了文本差异，作者的初始化、点到监督转换、冻结/优化/预算、阈值、crop/SAM/exemplar后处理及坐标问题处理均待核实；不能默认打开原CountGD的所有后处理就等于TPC论文设置。
+
+本地7份官方标注/split资产SHA256与记录来源一致，官方repo HEAD仍为`a382e85013673a3485e76a2fc2af158c0f779fdf`。当前有效split=6998/999/2000，公开原split=7000/1000/2000；用户批准的3图排除保持不变。taxonomy未解析图像train453/val56/test105，当前full-taxonomy会退回species，作者如何处理未知。因此直接改caption或改回全量split不足以完成严格复现，也不能擅自恢复已排除图、猜测分类或修改原数据。
+
+已保存审计：[protocol_audit.json](../runs/tpc268_paper_reproduction_20261017/protocol_audit.json)，官方README/通用Dataset副本及来源hash在同目录reference。该Dataset只给出点和3个exemplar框，不给CountGD专用监督转换/训练配置。已审阅的公开main仓库/项目页/论文未找到Table 4对应训练配置或权重；用户确认没有额外代码或权重。GitHub API限流403，但原始文件/HTML及git ls-remote可访问，此结论不是把网络失败误当文件不存在。
+
+下一步先取得或核实上述作者配方；所需问题已整理为[author_questions.md](../runs/tpc268_paper_reproduction_20261017/author_questions.md)，仅为本地草稿，未联系作者。若只能依据公开资料重建，必须逐项声明假设并另列“公开信息重建基线”，不能称完全复现；至少固定纯七级文本、原型覆盖、点监督、初始化与推理协议，和原R01独立记录。P01目前为WAITING_AUTHOR_PROTOCOL，尚无可信的完整复现启动命令。
+
+| 优先级 | ID | 状态 | 配置 / 输出run ID | 对照与问题 | 启动条件 |
+|---|---|---|---|---|---|
+| P1 | R07 | RUNNING | cfg_tpc268_contrast.py / contrast_seed42 | 对R01：contrast单独是否改善计数？ | 已在GPU2运行；短程已通过，正在正式30轮训练 |
+| P0 | P01 | WAITING_AUTHOR_PROTOCOL | tpc268_paper_reproduction_20261017 / protocol_audit.json | 复现论文Table 4全分类文本基线 | 先核实初始化/监督/训练推理配方；未启动 |
+| P1（用户明确先启动） | R08 | READY | cfg_tpc268_entailment.py / entailment_seed42 | 对R01：TT/TV单独是否改善计数？ | 执行下方run_r08.sh；先独立短程通过，再正式30轮 |
+| P2 | R09 | BLOCKED | cfg_tpc268_euclidean.py / euclidean_seed42 | 同完整辅助目标换几何，隔离Lorentz价值 | R02最终best-val及R07/R08结果就绪，且蕴涵或组合显示潜力；若仍要检验/主张几何差异则必做 |
+| P2 | R06 | BLOCKED | cfg_tpc268_organ_full.py / organ_method_seed42 | 配对R05，检查弱主文本下辅助收益 | R05完成，且R04或单项诊断有候选收益；若所有组合/单项均退化则不自动展开 |
+| P3 | 纯视觉控制 | BLOCKED | 尚未实现，不提供伪启动命令 | 控制所有语义文本输入，解释文本条件的贡献 | 主损失诊断后单独确定并验证真正visual-only路径；不以空caption或organ模式冒充 |
+| P3 | R10–R19 | BLOCKED | seed43/44扩展 | 检查候选收益稳定性 | 见附录C，不再按原计划默认跑满13–19组 |
+| P3 | A01 no-TT-bridge | BLOCKED | bridge_weight=0.0，新run | 仅删除TT bridge | 只有蕴涵已表现出可重复价值且需解释bridge时考虑；当前预算不展开 |
+
+BLOCKED在本计划表示明确的前置条件尚未满足，不表示程序故障。每次条件判断记录依据、时间、释放/跳过的ID；未启动项最终不执行时记SKIPPED并说明理由。新GPU只分配给未启动任务，不能抢占R04/R05/R07；R02已完成。
+
+**R07/R08首次短程**：R07已通过，不重复执行。R08仍需独立短程：配置不改，使用`--debug`、epochs=1、batch4，各约15步optimizer更新并完整val999张；目录必须为 `preflight/gpu_contrast_only` / `preflight/gpu_entailment_only`，不得用其checkpoint初始化30轮正式run。有限loss/实际反向与更新、checkpoint保存、完整计数JSON均通过后才启动正式run；失败先排查技术原因。下方helper是正式30轮，不带debug。
+
+### 2026-10-17 R08可直接使用的后台命令
+
+已准备`runs/tpc268_v3_exclude3/run_r08.sh`，固定物理GPU0，启动时要求剩余显存≥20000MiB；准备时实测空闲24124MiB。本次仅检查配置和脚本，没有执行训练。流程为独立短程约15步＋完整val999张 → 检查有限值、TT/TV存在且contrast关闭、Lorentz锥合法域及checkpoint → 从原FSC147权重独立训练30轮 → 最终best-val重评。不自动评估test。状态/阶段/日志分别写`entailment_seed42/status`、`stage`和`launch_entailment_seed42.log`；锁防重复，失败不继续后续阶段，独立session不依赖SSH。
+
+R08沿用原配置：full-taxonomy主文本、同三图排除、batch4、seed42、冻结backbone.0/BERT，与R01配对；`use_level_contrast=False`、`use_taxonomy_entailment=True`、Lorentz曲率默认固定1，总损失为原CountGD损失＋0.05 TT＋0.05 TV（TT含既有unit bridge），首epoch按step warmup。未修改模型、训练配置或数据协议。此启动方式替代下方旧的手动分步示例；不要同时执行两套命令。
+
+```bash
+cd /home/lijiahui/research/CountGD
+nohup setsid bash runs/tpc268_v3_exclude3/run_r08.sh \
+  > runs/tpc268_v3_exclude3/launch_entailment_seed42.log 2>&1 < /dev/null &
+```
+
+查看日志：`tail -f runs/tpc268_v3_exclude3/launch_entailment_seed42.log`。脚本语法、内嵌Python、有效配置及预检使用的日志字段已核对；真实GPU短程和正式结果均待用户执行后验证。
+
+```bash
+# R08短程示例：从仓库根目录执行，GPU1须在启动时重新核验空闲。
+CUDA_VISIBLE_DEVICES=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+MPLCONFIGDIR="$PWD/runs/tpc268_v3_exclude3/.mpl-cache" \
+uv run --no-sync python -u main.py -c config/cfg_tpc268_entailment.py \
+  --datasets config/datasets_tpc268.json --device cuda --seed 42 --num_workers 4 \
+  --pretrain_model_path checkpoints/checkpoint_fsc147_best.pth --debug --save_log \
+  --output_dir runs/tpc268_v3_exclude3/preflight/gpu_entailment_only \
+  --options text_encoder_type=checkpoints/bert-base-uncased epochs=1 batch_size=4
+# R07已通过短程且正在训练；不要重复执行R07短程或正式启动命令。
+```
+
+### 正式训练与best-val重评helper
+
+仅为尚未启动且门槛已通过的任务使用。把本块保存为 `runs/tpc268_v3_exclude3/diagnosis_helpers.sh` 后source；调用函数的第1参数是已核验空闲的物理GPU。函数在独立子shell中设置CUDA设备并对整个训练+验证持锁；训练失败则停止，不继续评估。相同协议、同目录重新执行会自动恢复latest；更改任何协议必须用新run ID及匹配baseline。
+
+```bash
+train_and_val() (
+  set -euo pipefail
+  local gpu="$1" run_id="$2" cfg="$3" seed="$4"
+  cd /home/lijiahui/research/CountGD
+  export PATH="$HOME/.local/bin:$PATH"
+  export CUDA_VISIBLE_DEVICES="$gpu" HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+  export MPLCONFIGDIR="$PWD/runs/tpc268_v3_exclude3/.mpl-cache"
+  local run_dir="$PWD/runs/tpc268_v3_exclude3/${run_id}_seed${seed}"
+  mkdir -p "$run_dir"
+  exec 9>"$run_dir/train.lock"
+  flock -n 9 || { echo 'This run is already active'; exit 1; }
+  echo "$BASHPID" > "$run_dir/launcher.pid"
+  uv run --no-sync python -u main.py -c "$cfg" \
+    --datasets config/datasets_tpc268.json --device cuda --seed "$seed" --num_workers 4 \
+    --pretrain_model_path checkpoints/checkpoint_fsc147_best.pth --save_log \
+    --output_dir "$run_dir" \
+    --options text_encoder_type=checkpoints/bert-base-uncased batch_size=4 epochs=30 \
+    2>&1 | tee -a "$run_dir/console.txt"
+  uv run --no-sync python -u main.py -c "$cfg" \
+    --datasets config/datasets_tpc268.json --device cuda --seed "$seed" --num_workers 4 \
+    --eval --eval_split val --resume "$run_dir/checkpoint_best_regular.pth" \
+    --output_dir "$run_dir/val" \
+    --options text_encoder_type=checkpoints/bert-base-uncased batch_size=4 epochs=30 \
+    2>&1 | tee -a "$run_dir/val_console.txt"
+)
+```
+
+R08通用helper后台示例：先保存helper、确认GPU1空闲并通过R08短程后再执行。本次不启动；R07已在GPU2训练，不再提供重复启动命令：
+
+```bash
+cd /home/lijiahui/research/CountGD
+nohup setsid bash -c 'source runs/tpc268_v3_exclude3/diagnosis_helpers.sh; train_and_val 1 entailment config/cfg_tpc268_entailment.py 42' \
+  > runs/tpc268_v3_exclude3/launch_entailment_seed42.log 2>&1 < /dev/null &
+# 第1参数是物理GPU编号，执行前按实际空闲状态调整。
+# R09通过门槛后：<空闲GPU> euclidean config/cfg_tpc268_euclidean.py 42。
+# R06通过门槛后：<空闲GPU> organ_method config/cfg_tpc268_organ_full.py 42。
+```
+
+所有完成后的正式比较使用`<run>/val/`的best重评，不能读取训练根目录最后epoch的val_counts冒充best。训练log中的`test_mae`实际为val MAE。
+
+```bash
+uv run --no-sync python tools/compare_tpc268_runs.py \
+  runs/tpc268_v3_exclude3/full_baseline_seed42/val \
+  runs/tpc268_v3_exclude3/full_method_seed42/val \
+  runs/tpc268_v3_exclude3/contrast_seed42/val \
+  runs/tpc268_v3_exclude3/entailment_seed42/val \
+  --output runs/tpc268_v3_exclude3/diagnosis_full_val.json
+# 等所有列出的目录存在且best-val重评完成后执行；R09若运行，再加入euclidean_seed42/val。
+```
+
+R04完成后单独比较species_baseline_seed42/val与species_method_seed42/val；R06若运行，单独比较organ_baseline_seed42/val与organ_method_seed42/val。每次比较必须有且只有一个同caption、冻结和seed的baseline；不得把R03当成R02的baseline。
+
+## 附录 B：决策规则：不为取得正结果反复试验
+
+令 `ΔMAE=method−matched baseline`，负值为改善；RMSE同样记录。
+
+| 实测情况 | 能支持的解释 | 下一步 |
+|---|---|---|
+| R07优于R01，R08/full较差 | contrast可能有用，蕴涵或组合可能引入干扰 | 先复跑contrast与baseline的seed43/44；不宣称双曲收益 |
+| R08优于R01，R07/full较差 | TT/TV可能有用，contrast或组合可能干扰 | 对蕴涵方案复跑；若保留几何主张，再增同entailment-only目标的Euclidean新对照；R09只是full目标几何对照，不能替代它 |
+| 两单项均有收益而full无收益 | 现有组合可能存在优化冲突 | 记录组合失败；不在本轮自动扫lambda或改已启动run |
+| R09与R02相当/更好 | 当前实验不支持Lorentz的额外价值 | 优先简单/更稳方案；没有多seed不声称两几何等效 |
+| R04优于R03，R02不优于R01 | 收益可能依赖主文本条件 | 用species配对复跑；若做organ扩展则R05/R06成对，收窄结论 |
+| R02/R04最终均无收益，R07/R08也不优于R01 | 现有实现/系数在已测条件下缺乏支持 | 本轮停止自动扩展R06/R09/bridge/权重搜索及大规模多seed；保留负结果与逐图诊断 |
+| 某方法MAE改善但RMSE退化 | 主/次指标存在取舍 | 明确报告取舍，不写成全面提升；可作为MAE主目标候选，但需排查高密度退化 |
+
+单seed的ΔMAE<0仅是候选门槛，不能据此宣称有效或显著；不按噪声幅度临时发明阈值、不从test挑方案。若全部单项/组合都无收益，可以报告限定于本协议的负结果；若要作跨seed稳定无收益的结论，须另跑预先确定的关键配对，不把“未显著改善”叫作统计等效。
+
+使用已保存的best-val逐图结果进行低成本诊断：同图误差差值、organ、GT数量固定桶`[0,20)、[20,50)、[50,100)、[100,200)、[200,+∞)`、species已见/未见及taxonomy解析/未解析。每组报告n、MAE/RMSE和有符号误差。原split有species交集，未见species须由有效train真实名单定义。
+
+辅助日志只检查机制：有效pair数、correct/wrong-parent包含率、negative-margin违例、非法域率、半径/饱和。已记录R02非法域率0只能说明该数值检查通过，不保证实现完全正确或辅助目标有益。梯度冲突/权重过强是待验证假设；除非另开明确诊断run取得证据，不把它们写成失败原因。此阶段不修改loss系数、warmup、LR、冻结策略或架构。
+
+## 附录 C：多seed与计算预算
+
+- 不再默认执行原M4的R10–R19。先完成原先已启动的5组、现在已启动的R07和待执行的R08；R06/R09各额外1组，均受门槛约束。短程、重评和分组分析另计，不承诺总小时数。
+- 根据seed42的**验证集**诊断选择至多一个最有证据且最简单的方案优先确认；seed42属于探索结果，保留所有已试方案，不能只报告获益者。
+- 确认固定seed43、44，每个seed同时训练候选和同caption baseline（额外4组，均从原FSC147初始化、30epochs），报告seed42/43/44各自指标、配对delta、均值±sample std。三seed仍是小样本，不自动等于显著。
+- 若坚持“Lorentz优于Euclidean”，必须补齐同辅助目标、同caption的Lorentz/Euclidean及对应baseline的三seed；若坚持“无需主文本物种信息仍有收益”，必须补齐organ配对三seed。未完成对应证据即放弃该强主张，不能用单seed锥指标替代。
+- 全部结果无收益时不自动投入上述4组；若研究目标需要稳健的负结果，预先指定完整方法或单项的关键配对再跑43/44，明确该追加预算与有限结论。
+- 纯视觉基线是输入协议核验，不是对比/蕴涵的单项消融。尚未实现前不启动；须核对CountGD视觉提示路径、正标签token和推理规则，不只把文本改成空字符串。未来若为比较论文而执行，使用新prompt协议/目录、相同原始初始化和30epoch预算，先做真实GPU检查；即使结果不同也不能自动归因于文本，仍需对齐作者训练/推理配方。
+
+## 附录 D：测试集使用与结果冻结
+
+R01/R03的test已经按用户明确要求提前查看（2026-10-16又按用户要求评估R02 test及R04/R05/R07阶段性best快照），属于本次研究的已暴露信息，保留并如实披露；后续选择完全基于val，不能再称整个研究过程从未查看test。原计划R04/R05/R06/R07/R08/R09配置此前已确定，本次只按验证证据调整优先级，不根据test数值挑lambda、epoch或seed。
+
+已有test不重复跑以挑更好结果。尚未评估的任务仅在其模型/阈值固定后使用val选出的best checkpoint做一次完整test；用户另行明确要求时可执行并记录时间，不把它用于继续调参。本次计划修改不启动任何test评估。报告所有已执行预定seed，缺失项明确标出；不能把val成绩与论文test成绩直接比较。
+
+## 附录 E：技术门槛、产物与文档
+
+- M0当前证据：根目录preflight/gpu_checks.status为DONE、exitcode=0，summary.json记录四组约15step+999张val、finite日志和checkpoint保存；原始资产哈希见preflight/input_sha256.json。旧协议失败日志及排除图可视化若仍在旧目录，仅作历史证据，不重用旧checkpoint。
+- 每个正式run保存latest/best/周期checkpoint、训练配置、console、逐epoch log；best重评保存val_counts/val_metrics。本轮以best val MAE选模型，保留对应RMSE/R2，另报末轮指标用于诊断。
+- 缺文件、坐标错误、split/指纹不一致、NaN/Inf、CUDA错误、计数JSON不完整为技术阻塞；MAE没改善不是技术异常。若修复改变协议，使用新run ID并重跑匹配baseline，不接续既有optimizer。
+- 不删除best/latest/原始日志，不修改或下载原数据/权重，不引入独立测试文件。`docs/`仅保留implement.md与experiment.md。每次实验/协议工作同步更新两文档，并从真实产物核实状态。
+- 原计划全文备份在 `runs/tpc268_v3_exclude3/planning/experiment_before_20261015_revision.md`；旧准备/测试时点记录由本节与上方状态表统一接续，备份不作为当前调度命令。
+
+## 附录 F：计划变更边界
+
+- 2026-10-15修订实验优先级；2026-10-16本次整理报告。原计划和整理前文档备份在runs/planning，本次不触碰任何已有启动脚本、配置、checkpoint、数据或运行进程。
+- 2026-10-17用户最新顺序：R04/R05已完成，R07照常完成；先准备R08层级蕴涵独立短程＋30轮启动命令（READY，未执行），同时继续核实P01论文全分类文本基线配方 → 条件式R06/R09 → 有候选才做确认seed → 冻结后汇总test。旧手动helper保留作历史参考，不与run_r08.sh重复执行。
+- 新计划是对当前负结果的探索性响应，后续结果必须披露这一调整和实际完成项，不包装成完全预注册的验证。
+
+
+## 2026-10-17 异名映射核验记录（仅建表，未改实验协议）
+
+用户要求核实22个未解析名称并建立带证据的表。完整22项人可读核验表、逐项权威来源及边界见[implement.md末节](implement.md)；机器审计表为[config/tpc268_species_alias_audit_20261017.json](../config/tpc268_species_alias_audit_20261017.json)，待启用别名为[config/tpc268_species_aliases_verified_20261017.json](../config/tpc268_species_aliases_verified_20261017.json)，CSV为[species_alias_audit.csv](../runs/tpc268_taxonomy_audit_20261017/species_alias_audit.csv)。
+
+结论：13项名称关系已证实，9项没有充分证据关联TPC表键；没有为了覆盖率强行凑22对。已核实表含13个新增项和此前Acacia_tortilis项，共14项，但未被现有配置引用。当前data/tpc268_metadata/species_aliases.json、原数据、排除名单、已运行实验的caption和分类协议保持不变；现有R01–R08的权重、性能记录不因本次核验改变。本次没有启动新训练或评估。
+
+| split | 当前协议可解析 / 有效图像 | 仅试读新表的可解析数 | 理论新增解析 | 新表仍未解析 |
+|---|---:|---:|---:|---:|
+| train | 6545 / 6998 | 6878 / 6998 | 333 | 120 |
+| val | 943 / 999 | 999 / 999 | 56 | 0 |
+| test | 1895 / 2000 | 1919 / 2000 | 24 | 81 |
+
+这些是元数据覆盖率检查，**不是新训练结果或性能提升**。当前22个名称影响614张；若仅启用13项，可关联其中413张，剩9名/201张需要作者或原始来源确认。Nubelaria与Vaccinium候选跨科，不能视为异名；几项Achyranthes疑似名称问题也未凭图像或相近拼写重标。名称同物关系也不独立证明每张照片的物种鉴定正确。数据库现在接受的名称与TPC存储键不同的，保留TPC键关联原ID，不重写整套上层分类。
+
+激活新表会改变caption输入、train taxonomy候选和辅助监督，须建立新的taxonomy协议和匹配baseline，不能改变已启动run或沿用旧结果冒充新协议。旧registry指纹仍为cf080ec256b9f9595a0cd6110b30d80fa84da0d49799217054e682185d79d65d；离线新表指纹e72c02067bd416b61ada53630629df9386294d98be9bed3a57279ccf17a6e2d0。已有试验继续原设定，P01缺作者初始化/训练配方问题仍存在，建立异名表不等于已完全复现论文。
+
+
+## 2026-10-17 P01 用户确认后的独立复现协议
+
+P01 工作树为 runs/tpc268_paper_reproduction_20261017/worktree，分支 repro/tpc268-b6f362b-original-mask，基于 b6f362b3f5cd20db4a171faa410dfed8f2f466d8；用户明确固定 GroundingDINO Swin-B 初始化，原 exemplar all-True mask，不应用修复。当前准备中，正式训练未启动、指标未知；不修改任何已启动实验。R08 的 stage 已实际核实为 TRAINING（2026-10-17 11:39:39 +08:00），此前 READY 仅为准备时点记录。
+
+用户最终缺失链规则：只用官方精确名称的七级链，无完整对应时只用 species，不启用自行推断/匹配的任何别名。保留原划分（代码排除既定3张）：train6998/full6258/species740，val999/full943/species56，test2000/full1895/species105。Acacia 旧异名和 × 缺省均不自行匹配。这是元数据覆盖率，不是性能；新完整图像/坐标/分词审计待执行。完整示例：Plantae, Tracheophyta, Magnoliopsida, Rosales, Rosaceae, Malus, Malus domestica.；回退：Musa sapientum.。没有 organ 或 taxonomy: 前缀。
+
+原版 Swin-B CountGD，无对比或层级辅助项；独立原版依赖；seed42、batch4、FP32、30轮、冻结backbone.0/bert、AdamW lr1e-4 wd1e-4、StepLR10、clip0.1，原图像增强和中心损失。验证/测试batch4、3个原exemplar、整图800/max1333、阈值.23/0，无SAM/裁剪/校正。crop训练时遵循原批内最少存活exemplar规则，不重复被裁掉的框。以 val MAE 选最佳，再固定权重重评 val 和一次 test。
+
+后台命令（准备检查通过后使用；如已启动勿重复执行）：
+
+```bash
+cd /home/new_space_1/new_space_1_for_lijiahui/research/CountGD
+nohup setsid bash runs/tpc268_paper_reproduction_20261017/worktree/run_reproduction.sh > runs/tpc268_paper_reproduction_20261017/pipeline.console.log 2>&1 < /dev/null &
+```
+
+脚本固定GPU3且要求至少22000MiB空闲；有独占锁，SSH断连继续运行。流程 audit → 15批短程训练＋999张val → 独立重新初始化正式30轮 → best val重评 → test。详细记录在该工作树 docs/implement.md 和 docs/experiment.md；本仓库此处为索引。论文该设置 test=16.90/43.32/0.71，val未报告。作者初始化、缺失分类链处理及完整训练推理配方仍未知；加上既定3图排除与species回退，P01属于明确记录假设的公开材料复现，不能称严格逐项一致，也不能从其与R01的差值单独归因mask/文本/初始化。
+
+2026-10-17 P01检查补记：现有环境完成全有效划分坐标和分词审计，最大46 tokens（含3个exemplar）；53份b6原核心文件逐字节相同，8组点增强检查通过。独立旧版环境/GPU检查待完成；没有训练性能记录。GroundingDINO初始化的label_enc.weight在b6 CountGD中不存在（dn_number=0），只允许这一明确的多余项，逐键加载报告保留。
+
+2026-10-17 初始化兼容补记：官方旧权重还序列化了bert.embeddings.position_ids（1×512固定arange）；固定版Transformers将其作为非持久buffer自动生成。入口验证其内容后允许忽略；并非丢弃可学习的BERT参数。除label_enc.weight和这一固定buffer外，其余unexpected键均阻止训练。
+
+2026-10-17 独立环境更新：uv已安装原requirements固定依赖，完整67项解析版本存requirements-reproduction.lock。Python3.9.19、torch2.2.1+cu121、torchvision0.17.1+cu121、transformers4.39.1；以CUDA Toolkit12.6、gcc/g++11、TORCH_CUDA_ARCH_LIST=8.6、MAX_JOBS=4用uv pip --no-build-isolation --no-deps编译原版ops并安装成功（ops_build.log）。固定环境也已完成全有效数据坐标/分词审计。后台入口显式uv run --offline --no-project --python指定该.venv解释器，避免继承main的Python版本选择。CUDA算子数值检查和短程训练仍待完成，正式指标未知。
+
+2026-10-17 CUDA数值校验已完成：原版ops/test.py的float/double前向对照和D=30/32/64/71四组数值梯度检查全部True（6/6），日志为复现实验根目录ops_check.log。下一阶段为原mask检查、初始化逐键核对及短程训练；正式训练未启动、正式指标未知。
+
+2026-10-17 12:13运行更新：复现代码已固定为492688c13a25e7bfa9566124ebebab7b99eae627，后台pipeline PID4079418，GPU3；阶段PREFLIGHT。初始化实际加载1106个GroundingDINO张量，缺失仅CountGD新增模块，额外仅已审查的label_enc与固定位置buffer。长短caption原mask运行检查通过，插入后padding仍保留且mask全True；已看到首个真实训练批次有限loss。15批+999张val完整检查尚在运行，正式30轮未开始，正式性能未知。
+
+2026-10-17 12:17最终运行更新：P01已在GPU3正式后台训练，pipeline PID4079418，stage=TRAINING 2026-10-17T12:17:29+08:00，代码提交492688c13a25e7bfa9566124ebebab7b99eae627。原版环境/全量数据审计、6项CUDA数值检查、原all-True mask检查、GroundingDINO逐键加载及15批训练+999张val均通过，audit/preflight/train指纹一致（fb63d9616f2f98f85ea17eb75352405d1fb048d4e75334c7b8d6d7acca1e84e8）。正式训练独立重置seed42并重新加载官方GroundingDINO，没有使用短程checkpoint。epoch从0起，目前正式val最佳轮次和val/test性能仍未知，尚无完整正式训练轮次。
+
+短程产物仅供技术验证：preflight/val_metrics.json记录15个训练批次后val n=999、MAE=34.845845845845844、RMSE=58.18040872974304、R²=0.7044194824592861；这不是30轮正式实验成绩或最终模型，不进入正式对照表。训练将完成30轮，以val MAE选best，再固定权重重评val和一次test。训练drop_last=True、评估drop_last=False沿用原规则；batch和顺序记录在协议中，原mask缺陷被保留。依赖锁、编译器、算子文件哈希见requirements-reproduction.lock、上级environment.json和ops_build/check日志。
+
+现在已启动，勿重复执行nohup命令。监控：`tail -f runs/tpc268_paper_reproduction_20261017/train.console.log`（在主仓库根目录执行）；阶段：`cat runs/tpc268_paper_reproduction_20261017/stage`。此次仅创建独立复现工作树和新环境/权重，没有改动已启动R07/R08、主工作树原有模型修改、数据及标注。原始b6核心文件仍逐字节相同。作者未公开的训练细节仍未知，本次是明确假设下的复现，不据当前准备结果宣称复现论文性能。
+
+2026-10-17 清理记录：按用户明确要求，仅删除P01 preflight/checkpoint.pth和preflight/checkpoint_best.pth两个预检权重，实际删除2个文件，共2500235378字节（约2.33GiB）。正式训练独立从GroundingDINO初始化，不读取这两个文件；正式train权重、审计JSON、检查日志、数据、标注和实验协议未变。

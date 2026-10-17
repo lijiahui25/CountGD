@@ -1,0 +1,246 @@
+{
+  "Acacia_tortilis": {
+    "canonical": "Vachellia tortilis",
+    "evidence": "https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:471662-1",
+    "reason": "Kew POWO explicitly lists Acacia tortilis as a synonym of Vachellia tortilis.",
+    "verified_on": "2026-10-12"
+  },
+  "Agrocybe_aegerita": {
+    "canonical": "Cyclocybe aegerita",
+    "evidence": "https://www.indexfungorum.org/names/namesrecord.asp?RecordID=114787",
+    "reason": "两条Index Fungorum记录共享基名Agaricus aegerita V.Brig.；当前均链接Cyclocybe cylindracea。此映射保留TPC官方键Cyclocybe aegerita，不将其误称当前数据库接受名。",
+    "verified_on": "2026-10-17",
+    "relation": "same_basionym_and_taxonomic_synonymy",
+    "evidence_sources": [
+      {
+        "url": "https://www.indexfungorum.org/names/namesrecord.asp?RecordID=114787",
+        "title": "Index Fungorum: Agrocybe aegerita, record 114787",
+        "finding": "给出基名Agaricus aegerita和当前名Cyclocybe cylindracea。",
+        "verified_on": "2026-10-17"
+      },
+      {
+        "url": "https://www.indexfungorum.org/names/NamesRecord.asp?RecordID=550610",
+        "title": "Index Fungorum: Cyclocybe aegerita, record 550610",
+        "finding": "同一基名和同一当前名，证实两种组合的关联。",
+        "verified_on": "2026-10-17"
+      }
+    ],
+    "authority_current_name": "Cyclocybe cylindracea（Index Fungorum）"
+  },
+  "Arenaria_paludicola": {
+    "canonical": "Minuartia paludicola",
+    "evidence": "https://www.efloras.org/florataxon.aspx?flora_id=1&taxon_id=250060022",
+    "reason": "Flora of North America的Arenaria paludicola条目明确列出Minuartia paludicola (B.L.Rob.) House。使用TPC表键，不替换其上级分类。",
+    "verified_on": "2026-10-17",
+    "relation": "published_synonym",
+    "evidence_sources": [
+      {
+        "url": "https://www.efloras.org/florataxon.aspx?flora_id=1&taxon_id=250060022",
+        "title": "Flora of North America / eFloras: Arenaria paludicola",
+        "finding": "同一条目列出Minuartia paludicola作为异名。",
+        "verified_on": "2026-10-17"
+      }
+    ],
+    "authority_current_name": "Arenaria paludicola（FNA）"
+  },
+  "Doellingeria_breweri": {
+    "canonical": "Eucephalus breweri",
+    "evidence": "https://uwaterloo.ca/astereae-lab/research/asters/eucephalus/doellingeria-eucephalus-breweri",
+    "reason": "Waterloo分类研究者页面明确串联Doellingeria breweri、Aster breweri与Eucephalus breweri。不同数据库版本采用的属名可不同，映射目标固定为TPC键。",
+    "verified_on": "2026-10-17",
+    "relation": "published_generic_recombination",
+    "evidence_sources": [
+      {
+        "url": "https://uwaterloo.ca/astereae-lab/research/asters/eucephalus/doellingeria-eucephalus-breweri",
+        "title": "University of Waterloo Astereae Lab: Doellingeria breweri",
+        "finding": "同一物种的命名历史中明确列出Eucephalus breweri与Doellingeria breweri。",
+        "verified_on": "2026-10-17"
+      }
+    ],
+    "authority_current_name": "Doellingeria breweri（Waterloo用名）"
+  },
+  "Doellingeria_engelmannii": {
+    "canonical": "Eucephalus engelmannii",
+    "evidence": "https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:97873-2",
+    "reason": "POWO在Eucephalus engelmannii同型异名列表中列Doellingeria engelmannii；Waterloo另说明属转移历史。",
+    "verified_on": "2026-10-17",
+    "relation": "homotypic_synonym",
+    "evidence_sources": [
+      {
+        "url": "https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:97873-2",
+        "title": "Kew POWO: Eucephalus engelmannii",
+        "finding": "异名列表包含Doellingeria engelmannii。",
+        "verified_on": "2026-10-17"
+      },
+      {
+        "url": "https://uwaterloo.ca/astereae-lab/research/asters/eucephalus/doellingeria-eucephalus-engelmannii",
+        "title": "University of Waterloo Astereae Lab: Doellingeria engelmannii",
+        "finding": "叙述由Aster到Eucephalus再到Doellingeria的命名历史。",
+        "verified_on": "2026-10-17"
+      }
+    ],
+    "authority_current_name": "Eucephalus engelmannii（POWO）"
+  },
+  "Doellingeria_ledophylla": {
+    "canonical": "Eucephalus ledophyllus",
+    "evidence": "https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:97882-2",
+    "reason": "POWO接受种Eucephalus ledophyllus明确列Doellingeria ledophylla为同型异名，词尾差异来自组合中的性别一致。",
+    "verified_on": "2026-10-17",
+    "relation": "homotypic_synonym",
+    "evidence_sources": [
+      {
+        "url": "https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:97882-2",
+        "title": "Kew POWO: Eucephalus ledophyllus",
+        "finding": "同型异名包括Doellingeria ledophylla (A.Gray) Semple, Brouillet & G.A.Allen。",
+        "verified_on": "2026-10-17"
+      }
+    ],
+    "authority_current_name": "Eucephalus ledophyllus（POWO）"
+  },
+  "Drynaria_roosii": {
+    "canonical": "Aglaomorpha fortunei",
+    "evidence": "https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:77163105-1",
+    "reason": "当前POWO把Aglaomorpha fortunei列为Drynaria roosii异名。映射方向为原目录名到TPC表键，与当前接受名方向相反但关系明确。",
+    "verified_on": "2026-10-17",
+    "relation": "reverse_direction_synonym",
+    "evidence_sources": [
+      {
+        "url": "https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:77163105-1",
+        "title": "Kew POWO: Aglaomorpha fortunei",
+        "finding": "明确归为Drynaria roosii的异名。",
+        "verified_on": "2026-10-17"
+      }
+    ],
+    "authority_current_name": "Drynaria roosii（POWO）"
+  },
+  "Gelasia_filifolia": {
+    "canonical": "Scorzonera filifolia",
+    "evidence": "https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:77204026-1",
+    "reason": "POWO接受Gelasia filifolia，其同型异名为Scorzonera filifolia Boiss.；使用TPC的旧组合键。",
+    "verified_on": "2026-10-17",
+    "relation": "reverse_direction_homotypic_synonym",
+    "evidence_sources": [
+      {
+        "url": "https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:77204026-1",
+        "title": "Kew POWO: Gelasia filifolia",
+        "finding": "同型异名列表含Scorzonera filifolia Boiss.。",
+        "verified_on": "2026-10-17"
+      }
+    ],
+    "authority_current_name": "Gelasia filifolia（POWO）"
+  },
+  "Mentha_haplocalyx": {
+    "canonical": "Mentha canadensis",
+    "evidence": "https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:157356-2",
+    "reason": "POWO的Mentha haplocalyx Briq.条目明确指向Mentha canadensis。",
+    "verified_on": "2026-10-17",
+    "relation": "published_synonym",
+    "evidence_sources": [
+      {
+        "url": "https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:157356-2",
+        "title": "Kew POWO: Mentha haplocalyx",
+        "finding": "明确归为Mentha canadensis的异名。",
+        "verified_on": "2026-10-17"
+      }
+    ],
+    "authority_current_name": "Mentha canadensis（POWO）"
+  },
+  "Mitella_formosana": {
+    "canonical": "Asimitellaria formosana",
+    "evidence": "https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:77217833-1",
+    "reason": "POWO接受Asimitellaria formosana，并列Mitella formosana (Hayata) Masam.为同型异名。",
+    "verified_on": "2026-10-17",
+    "relation": "homotypic_synonym",
+    "evidence_sources": [
+      {
+        "url": "https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:77217833-1",
+        "title": "Kew POWO: Asimitellaria formosana",
+        "finding": "同型异名列表包含Mitella formosana。",
+        "verified_on": "2026-10-17"
+      },
+      {
+        "url": "https://www.worldfloraonline.org/taxon/wfo-1000025544",
+        "title": "WFO: Asimitellaria formosana",
+        "finding": "异名列表包含Mitella formosana。",
+        "verified_on": "2026-10-17"
+      }
+    ],
+    "authority_current_name": "Asimitellaria formosana（POWO）"
+  },
+  "Musa_sapientum": {
+    "canonical": "Musa × paradisiaca",
+    "evidence": "https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:797606-1",
+    "reason": "目录省略杂交符号；当前规范化已允许此差异。POWO的Musa × sapientum L.明确指向Musa × paradisiaca；此为名称关系，不是对每张照片栽培品种的重新鉴定。",
+    "verified_on": "2026-10-17",
+    "relation": "hybrid_synonym_with_marker_normalization",
+    "evidence_sources": [
+      {
+        "url": "https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:797606-1",
+        "title": "Kew POWO: Musa × sapientum",
+        "finding": "明确归为Musa × paradisiaca的异名。",
+        "verified_on": "2026-10-17"
+      }
+    ],
+    "authority_current_name": "Musa × paradisiaca（POWO）"
+  },
+  "Myrica_pensylvanica": {
+    "canonical": "Morella pensylvanica",
+    "evidence": "https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:1001459-2",
+    "reason": "当前POWO接受Myrica pensylvanica，Morella pensylvanica为其异名；映射到TPC的Morella键，不声称它是当前POWO接受名。",
+    "verified_on": "2026-10-17",
+    "relation": "reverse_direction_synonym",
+    "evidence_sources": [
+      {
+        "url": "https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:1001459-2",
+        "title": "Kew POWO: Morella pensylvanica",
+        "finding": "明确归为Myrica pensylvanica的异名。",
+        "verified_on": "2026-10-17"
+      }
+    ],
+    "authority_current_name": "Myrica pensylvanica（POWO）"
+  },
+  "Pentanema_britannicum": {
+    "canonical": "Pentanema britannica",
+    "evidence": "https://www.ipni.org/n/77178407-1",
+    "reason": "IPNI同一条目记录发表时写作britannicum，修订名称为britannica，并说明种加词为同位名词；这是有文献依据的拼写修订。",
+    "verified_on": "2026-10-17",
+    "relation": "documented_orthographic_correction",
+    "evidence_sources": [
+      {
+        "url": "https://www.ipni.org/n/77178407-1",
+        "title": "IPNI: Pentanema britannica",
+        "finding": "同一记录注明原发表拼写britannicum及同位名词解释。",
+        "verified_on": "2026-10-17"
+      },
+      {
+        "url": "https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:77178407-1",
+        "title": "Kew POWO: Pentanema britannica",
+        "finding": "确认当前名称和条目。",
+        "verified_on": "2026-10-17"
+      }
+    ],
+    "authority_current_name": "Pentanema britannica（IPNI/POWO）"
+  },
+  "Tibetiodes_flaccida": {
+    "canonical": "Aster flaccidus",
+    "evidence": "https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:181223-1",
+    "reason": "POWO的Aster flaccidus明确指向Tibetiodes flaccida，IPNI的新组合也引用Aster flaccidus为基名。映射保留TPC旧组合。",
+    "verified_on": "2026-10-17",
+    "relation": "reverse_direction_synonym",
+    "evidence_sources": [
+      {
+        "url": "https://powo.science.kew.org/taxon/urn:lsid:ipni.org:names:181223-1",
+        "title": "Kew POWO: Aster flaccidus",
+        "finding": "明确归为Tibetiodes flaccida的异名。",
+        "verified_on": "2026-10-17"
+      },
+      {
+        "url": "https://www.ipni.org/n/77218930-1",
+        "title": "IPNI: Tibetiodes flaccida",
+        "finding": "基名为Aster flaccidus Bunge。",
+        "verified_on": "2026-10-17"
+      }
+    ],
+    "authority_current_name": "Tibetiodes flaccida（POWO）"
+  }
+}
