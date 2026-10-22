@@ -1,16 +1,30 @@
 # CountGD / TPC-268 阶段实验报告与后续计划
 
-**报告更新：2026-10-17，Asia/Shanghai。** 本次状态采集约11:26–11:28，R04/R05完成并核验best-val，R07仍在训练；10月16日test快照保留各自权重身份。新增论文复现协议审计与优先级修订，见附录A的2026-10-17说明。本报告是实验记录的固定入口，后续按第10节规则持续更新。实现细节见 [implement.md](implement.md)。
+**报告更新：2026-10-22，Asia/Shanghai；R08-GD-LC已完成20轮、best-val及完整test，14:07:58退出0，第12轮best，结果见主表和末节。** R08-GD的完整测试已于今日09:52核验通过；R06/R08-LC测试记录至10月21日11:55。R06-ELC保留今日13:56只读快照（完成17轮，仍训练），本次不重报其他任务当前进度；P04仍保留10月19日15:51历史快照，本次未重查。实现细节见 [implement.md](implement.md)。
 
-实验根目录：`runs/tpc268_v3_exclude3/`。当前代码HEAD=`8a26e86cffc8f5209c7924cf0d425044eaa0bdd4`，存在已记录的工作区修改；**当前HEAD不等于每个实验启动时的代码版本**，详见第9节。所有指标来自实际日志、最佳checkpoint元数据或计数JSON；没有结果的单元格用“—”，不填推测值。
+**2026-10-22补记：R08-GD已完成30轮、best-val及完整test核验，最佳第25轮；test=19.0240/49.7241/0.6219（MAE/RMSE/R²），详见末节。**
+
+实验根目录：`runs/tpc268_v3_exclude3/`。当前代码HEAD=`6341592d13575f3626bc70f08604b96ab231f4ef`，存在文档、R08可学习曲率新配置及GroundingDINO初始化专用入口的工作区修改；**当前HEAD不等于每个实验启动时的代码版本**，详见第9节。所有指标来自实际日志、最佳checkpoint元数据或计数JSON；没有结果的单元格用“—”，不填推测值。
 
 ## 1. 当前结论摘要
 
-- R01/R02/R03均已完成30轮训练、best-val独立重评及用户指定的2000张test评估；退出码均为0。
-- R04/R05均已完成30轮训练及best-val重评，退出码0；分别于10月17日07:13:21/01:50:16结束。best仍为第11/12轮，无更新。最终best文件SHA256与10月16日已评估快照一致，已有test可用于相同最终选定权重，无需重复推理。
-- R07完成21轮，正在第22轮；best已从第1轮更新为第16轮，val MAE=11.0701、RMSE=36.0906、R²=0.8863。10月16日test=13.3415对应旧第1轮，不能作为当前best的test。该训练继续按原预算进行。
-- 完整辅助方案R02相对同文本基线R01：val MAE恶化，但test MAE小幅降低、RMSE升高。证据是**单seed、数据划分和指标相关的取舍**，不支持“全面提升”，也不足以证明contrast或双曲建模分别无效。
-- 10月17日用户先提出论文Table 4全分类文本基线复现，随后明确要求先提供原计划R08层级蕴涵实验的启动命令。R08现为READY，GPU0脚本已准备但尚未执行；R07不修改。论文初始化与训练配方仍待核实，P01继续记录缺项，不能把R08或猜测配置称作论文完全复现。
+- R01–R05、R07、R08、P01、P02、P03均已完成30轮及best-val重评；各自最终test见第7节，均对应val选出的固定权重。
+- **R07 contrast-only最终结果为负。** 第16轮best：val=11.0701/36.0906/0.8863，test=18.3190/48.8021/0.6358（MAE/RMSE/R²）。相对同协议R01，test MAE增加44.83%、RMSE增加33.18%，val三指标也退化。本seed、当前实现与超参数下不支持contrast-only的整体计数收益。
+- **退化具有分组差异。** R07低计数图像略好，高计数图像和seed器官组明显少计；不是每张图都变差，不能把总指标退化直接等同于已经查明失败机制。
+- R02完整辅助方案：val三指标均差于R01；test MAE仅改善2.16%，RMSE/R²退化。R04相对R03：val和test MAE均变差，test RMSE/R²改善。现有结果不支持完整方法全面提升，也不宜抹去局部指标取舍。
+- R05在已完成基线中test MAE/RMSE最低，R03的val MAE最低；三组主文本不同且只有seed42，不能宣称organ-only普遍最好，或层级文本天然有害。
+- **R08 TT/TV-only未显示整体计数收益。** 最终第12轮best：val=9.9880/29.5085/0.9240，test=13.6890/37.2070/0.7883。相对R01，val MAE仅降0.1501%、RMSE升11.4547%；test MAE升8.2220%、RMSE升1.5384%、R²下降0.0064，测试三指标退化。
+- **P02仅修复mask没有带来全面改善。** 第14轮best：val=10.8949/31.2740/0.9146，test=19.2080/51.6365/0.5923；对照P01的test=19.4665/50.4593/0.6107，MAE降1.3279%，RMSE升2.3330%，无法解释与R01的全部差距。
+- **P03初始化来源对照显示明显收益。** 完成30轮，第5轮best：val=10.4855/28.1765/0.9307，test=11.3380/35.4983/0.8073。仅相对P02由GroundingDINO换为FSC147 CountGD初始化，val三指标改善，test MAE降低40.9725%、RMSE降低31.2536%、R²增加0.2150；结论限于当前固定P协议/seed42及修复mask条件。
+- P04保留10月19日15:51快照：GPU2完成4/30、正在第5轮；输入仅`{organ}.`，与P03配对仅主caption不同，阶段性best第2轮val=10.7938/32.3066/0.9089；本次未重查P04，不把旧进度当作当前进度。
+- **尚不能判定双曲几何无效。** R07没有TT/TV；R08最终test三指标退化，R09欧氏匹配对照未做。P01同时改变初始化、caption、原mask与环境，不能单独归因任何一项，也不能声称已复现论文最终性能。R06及R08-LC均已完成20轮及best-val/test；R09保留原门槛；不根据已查看test临时调参数或选择测试集最佳epoch。
+
+- **10月21日新增：R06未显示organ完整辅助方案的测试收益。** 第5轮best，test=10.7340/30.7243/0.8557，相对R05 MAE增加1.7730%、RMSE增加2.8582%；val MAE略差，val RMSE/R²较好，不能用验证集局部改善代替测试收益。
+- **R08-LC相对固定曲率R08测试三指标改善。** 第1轮best，c=0.84096497，test=11.1400/32.8648/0.8348；MAE降低18.6208%、RMSE降低11.6703%、R²增加0.0465253。val MAE仍差2.4253%，因此尚无val MAE选择指标的收益。两组旧基线前20轮与30轮选择相同best，可作等预算选择范围参照；结论限于当前单seed/当前实现，不能宣称普遍有效或根据test继续调曲率。
+
+- **10月22日新增：R08-GD的初始化来源对照未显示收益。** 第25轮best，val=10.5656/33.0084/0.9049，test=19.0240/49.7241/0.6219。相对同30轮固定曲率R08，val三指标退化，test MAE增加38.9729%、RMSE增加33.6418%、R²下降0.1663863；当前单seed下FSC147 CountGD初始化更好。这不是双曲与欧氏几何的配对实验，不能据此归因几何本身；旧R08源码归档及监控依赖元数据差异的边界保留。
+
+- **10月22日新增：R08-GD-LC完成并补齐test。** 第12轮best，c=0.63181096，val=10.8919/31.3099/0.9144，test=15.4620/42.5036/0.7238。相对同20轮的R08-LC仅初始化不同，val三指标均较差，test MAE增加38.7971%、RMSE增加29.3285%、R²下降0.1110834；当前单seed仍支持FSC147 CountGD初始化。GD-LC与GD30轮test的差异混有预算/权重选择范围变化，不能当作曲率单因素结论；固定GD前20轮参照仅核到val，尚无对应test。
 
 ## 2. 模型结构与训练目标有什么修改
 
@@ -51,9 +65,9 @@ L_total = L_CountGD + w(step) * [0.1 L_contrast + 0.05 L_TT + 0.05 L_TV]
 
 | 模式 | 主caption模板 | 使用实验 |
 |---|---|---|
-| `full_taxonomy` | `{organ} of {species}; taxonomy: {Kingdom}, {Phylum}, {Class}, {Order}, {Family}, {Genus}, {Species} .` | R01/R02/R07，计划R08/R09 |
+| `full_taxonomy` | `{organ} of {species}; taxonomy: {Kingdom}, {Phylum}, {Class}, {Order}, {Family}, {Genus}, {Species} .` | R01/R02/R07/R08，条件式R09 |
 | `species` | `{organ} of {species} .` | R03/R04 |
-| `organ` | `{organ} .` | R05，条件式R06 |
+| `organ` | `{organ} .` | R05、R06、R06-ELC |
 
 从当前registry实际生成的同一物种示例：
 
@@ -77,15 +91,19 @@ fruit .
 | R04 | species | contrast + Lorentz TT/TV | `cfg_tpc268_species_full.py` | R03 |
 | R05 | organ | 无 | `cfg_tpc268_organ_baseline.py` | 自身 |
 | R06 | organ | contrast + Lorentz TT/TV | `cfg_tpc268_organ_full.py` | R05 |
+| R06-ELC | organ | 仅Lorentz TT/TV .05/.05，可学习c；contrast关闭 | `cfg_tpc268_organ_entailment_learnable.py` | R06（两开关组合对照）；R08-LC（主文本对照）；R05基线 |
 | R07 | full_taxonomy | contrast-only，权重0.1 | `cfg_tpc268_contrast.py` | R01 |
-| R08 | full_taxonomy | Lorentz TT/TV-only，权重0.05/0.05 | `cfg_tpc268_entailment.py` | R01 |
+| R08 | full_taxonomy | Lorentz TT/TV-only，权重0.05/0.05，固定c=1 | `cfg_tpc268_entailment.py` | R01 |
+| R08-LC | full_taxonomy | 同R08，TT/TV共享可学习c，初始1 | `cfg_tpc268_entailment_learnable.py` | 固定曲率R08前20轮 |
+| R08-GD | full_taxonomy | 同R08固定c=1的TT/TV；改用GroundingDINO Swin-B初始化 | `cfg_tpc268_entailment.py`，专用初始化入口 | R08（30轮初始化来源对照） |
+| R08-GD-LC | full_taxonomy | GroundingDINO初始化，可学习c，仅TT/TV .05/.05 | `cfg_tpc268_entailment_learnable.py`，独立入口 | R08-LC（同20轮，初始化对照）；R08-GD前20轮（曲率对照） |
 | R09 | full_taxonomy | contrast + Euclidean TT/TV | `cfg_tpc268_euclidean.py` | R01；几何配对R02 |
 
 | 公共项目 | 实际设置 |
 |---|---|
-| 初始化 | 每组独立从`checkpoints/checkpoint_fsc147_best.pth`开始；不从其他TPC微调权重初始化 |
+| 初始化 | R系列默认独立从`checkpoints/checkpoint_fsc147_best.pth`开始；R08-GD及R08-GD-LC例外，使用原始GroundingDINO Swin-B；不从其他TPC微调权重初始化 |
 | 语言权重 | `checkpoints/bert-base-uncased` |
-| 随机种子 / 预算 | seed42，单GPU，30epochs，FP32，不启用AMP |
+| 随机种子 / 预算 | seed42，单GPU，默认30epochs；R06、R06-ELC、R08-LC及R08-GD-LC按用户要求20epochs，FP32，不启用AMP |
 | batch / steps | train batch4、drop_last；每完整epoch1749个训练batch；eval实际batch1 |
 | 优化 | AdamW；基础LR1e-4、weight decay1e-4、clip0.1；StepLR每10epoch衰减 |
 | 冻结 | `backbone.0`和`bert`；900queries，DN实际为0 |
@@ -102,23 +120,46 @@ fruit .
 
 坐标策略=`strict_points_clip_exemplars_v1`：计数点必须有效且在原图内；exemplar ROI与图像取正面积交集，保留全部有效GT。有效taxonomy覆盖train6545/6998、val943/999、test1895/2000；registry fingerprint=`cf080ec256b9f9595a0cd6110b30d80fa84da0d49799217054e682185d79d65d`。原始269个species-organ单元保留；split物种仍有交集，不能统称完全未见物种划分。
 
+### 4.1 P01独立复现协议（不与上述公共设置混用）
+
+第2–4节的FSC147初始化和公共caption协议适用于R01–R09。P01工作树为`runs/tpc268_paper_reproduction_20261017/worktree/`，代码提交`492688c13a25e7bfa9566124ebebab7b99eae627`；从官方GroundingDINO Swin-B初始化，保留b6原始插入后全True mask，不启用辅助损失。使用官方七级名称逗号连接的caption；仅下划线转空格后精确查表，缺链则`Species.`，不使用任何手工异名映射。train/val/test=6998/999/2000，其中完整链6258/943/1895，其余740/56/105只用species；相同三图代码排除。独立Python3.9.19/torch2.2.1/transformers4.39.1，原train及eval batch4，30轮seed42、中心监督及原增强、整图阈值.23/0。作者未公开的配方仍标未知，不能将P01与R01差值当作单一因素效应。
+
+### 4.2 P01/P02/P03/P04控制矩阵
+
+P01/P02/P03均用纯官方七级逗号caption、无链species回退；P04仅相对P03改为organ-only。四组均为无辅助损失CountGD，原数据划分及三图代码排除，无手工异名，旧版锁定环境，train/eval batch4、seed42、30轮预算及统一推理。与R系列的额外organ/species文字、环境和名称解析规则区分。
+
+| ID | 初始化 | exemplar padding/mask | 唯一配对变化 | 运行源码提交 |
+|---|---|---|---|---|
+| P01 | GroundingDINO Swin-B | b6原版all-True | 公开材料重建基线 | `492688c13a25e7bfa9566124ebebab7b99eae627` |
+| P02 | GroundingDINO Swin-B | 去padding→插入→重新padding | 相对P01仅修复mask | `d521714b4515d07688a8686b34a03514842be56c` |
+| P03 | FSC147 CountGD | 与P02一致 | 相对P02仅初始化来源；只载model | `2e964cdb9ef1ec6c02f3c4438bf1863ba3eea49b` |
+| P04 | 与P03相同 | 与P03一致 | 相对P03仅主caption为`{organ}.` | `fc6ad2e66602b234111f965d3bcac618e68fa408` |
+
 ## 5. 实验状态与最佳权重轮次
 
-所有轮次均为**1-based**；日志`epoch=0`是第1轮。RUNNING取本次采集时刻，正式`log.txt`一行代表完成一轮训练与验证。R07的外层console包含短程输出，正式进度/结果只读取正式目录`log.log`/`log.txt`及checkpoint。
+本节及主表轮次均为**1-based**，原始日志/checkpoint的epoch从0起。完整轮数只统计训练和整轮val都完成的日志；R08/P02已核对30条完整训练+val日志、成功退出状态及最佳权重；P03已核对完整30轮、best checkpoint、成功退出及val/test产物；P04进度标注为10月19日15:51历史快照。
 
-| ID | 训练GPU | 状态 | 完整轮数与最新训练位置 | 最佳权重轮次 |
+| ID | 训练GPU | 状态 | 完整预算与进度 | 最佳权重轮次 |
 |---|---:|---|---|---|
-| R01 | 0 | DONE | 30/30，训练及best-val重评结束 | 第2轮（checkpoint元数据已核对） |
-| R02 | 2 | DONE | 30/30，训练及best-val重评结束 | 第3轮（checkpoint元数据已核对） |
-| R03 | 3 | DONE | 30/30，训练及best-val重评结束 | 第12轮（checkpoint元数据已核对） |
-| R04 | 3 | DONE | 30/30，10月17日07:13:21结束，best-val重评完成，退出码0 | 第11轮，未刷新（checkpoint已核对） |
-| R05 | 0 | DONE | 30/30，10月17日01:50:16结束，best-val重评完成，退出码0 | 第12轮，未刷新（checkpoint已核对） |
-| R07 | 2 | RUNNING | 完成21/30；第22轮，batch 1480/1749（10月17日约11:26） | 第16轮，已刷新（checkpoint已核对） |
-| R06 | — | BLOCKED | 未启动，等待计划门槛 | — |
-| R08 | 0（准备分配） | READY | 用户明确要求先启动，run_r08.sh已准备；本次未执行 | — |
-| R09 | — | BLOCKED | 未启动，等待计划门槛 | — |
+| R01 | 0 | DONE | 30/30，best-val及test完成 | 2 |
+| R02 | 2 | DONE | 30/30，best-val及test完成 | 3 |
+| R03 | 3 | DONE | 30/30，best-val及test完成 | 12 |
+| R04 | 3 | DONE | 30/30，best-val及固定快照test完成，最终best SHA相同 | 11 |
+| R05 | 0 | DONE | 30/30，best-val及固定快照test完成，最终best SHA相同 | 12 |
+| R07 | 2 | DONE | 30/30，best-val及最终test完成，exitcode=0 | 16 |
+| R08 | 0（已释放） | DONE | 30/30，best-val及test完成；test于10月19日11:21:15退出0 | 12 |
+| P01 | 3（已释放） | DONE | 30/30，best-val及test完成，10月18日19:43:01正常退出 | 2 |
+| P02 | 2（已释放） | DONE | 30/30，best-val及test完成；10月19日06:07:41退出0 | 14 |
+| P03 | 3（已释放） | DONE | 30/30，best-val及test完成；10月20日03:17:34退出0 | 5 |
+| P04 | 2 | RUNNING（历史快照） | 10月19日15:51完成4/30、正在第5轮；本次未重查最新进度 | 2（截至旧快照） |
+| R06 | 3（测试已结束） | DONE | 20/20，best-val及test完成；10月21日11:55:28退出0 | 5 |
+| R08-LC | 1（测试已结束） | DONE | 20/20，best-val及test完成；10月21日11:55:52退出0 | 1 |
+| R08-GD | 2（已释放） | DONE | 30/30、best-val及完整test完成；10月22日09:52核验通过；后处理检查修正见末节 | 25 |
+| R08-GD-LC | 1（测试进程已释放） | DONE | 20/20、best-val及完整test完成；10月22日14:07:58退出0；best c=0.63181096 | 12 |
+| R06-ELC | 3 | RUNNING（10月21日17:32核实） | 第1/20轮，batch20/1749，完整轮次0；仅TT/TV、可学习c | — |
+| R09 | — | BLOCKED | 尚未启动，门槛保留 | — |
 
-DONE表示训练与best-val重评结束；test是否完成见第7节，二者不混用。R01–R05退出码均为0。R07只完成部分预算，当前不能作最终结论。宿主机只显示GPU0/1/2/3，10月17日11:26空闲为0和3；不存在index4，避免混淆物理编号与第几张卡。
+R07最终test于2026-10-17 22:36:54结束；第1轮旧test另列为历史快照，不替换第16轮最终结果。
 
 ## 6. 验证集性能
 
@@ -131,8 +172,18 @@ DONE表示训练与best-val重评结束；test是否完成见第7节，二者不
 | R03 | 12 | 999 | 9.6707 | 28.6010 | 0.9286 | best权重独立重评完成 |
 | R04 | 11 | 999 | 10.7818 | 32.4995 | 0.9078 | 最终best权重独立重评完成 |
 | R05 | 12 | 999 | 10.4765 | 30.3528 | 0.9196 | 最终best权重独立重评完成 |
-| R07 | 16 | 999 | 11.0701 | 36.0906 | 0.8863 | 阶段性正式训练日志；best checkpoint已核对 |
-| R06/R08/R09 | — | — | — | — | — | 尚未启动 |
+| R07 | 16 | 999 | 11.0701 | 36.0906 | 0.8863 | 最终best独立重评及逐图重算一致 |
+| R08 | 12 | 999 | 9.9880 | 29.5085 | 0.9240 | 最终best独立重评；逐图重算与checkpoint核对通过 |
+| P01 | 2 | 999 | 10.9339 | 26.8876 | 0.9369 | 最终best独立重评完成 |
+| P02 | 14 | 999 | 10.8949 | 31.2740 | 0.9146 | 最终best独立重评；逐图重算与checkpoint核对通过 |
+| P03 | 5 | 999 | 10.4855 | 28.1765 | 0.9307 | 最终best独立重评；checkpoint/逐图重算核验通过 |
+| P04 | 2 | 999 | 10.7938 | 32.3066 | 0.9089 | 阶段性best，正式日志与best_val_metrics.json一致，未完成30轮 |
+| R08-LC | 1 | 999 | 10.2302 | 28.6251 | 0.9284 | 20轮完成，best权重独立重评完成 |
+| R08-GD | 25 | 999 | 10.5656 | 33.0084 | 0.9049 | 30轮完成；最佳权重独立重评，与逐轮日志一致 |
+| R06 | 5 | 999 | 10.6406 | 26.0450 | 0.9408 | 20轮完成，best权重独立重评完成 |
+| R08-GD-LC | 12 | 999 | 10.8919 | 31.3099 | 0.9144 | 20轮完成，独立best-val与完整训练日志一致 |
+| R06-ELC | — | — | — | — | — | 已启动20轮，无完整val/test |
+| R09 | — | — | — | — | — | 尚未训练，无性能 |
 
 R01–R05的训练best日志、checkpoint的epoch/best_val_mae与独立重评一致；R04/R05最终999张best-val逐图MAE/RMSE/R²已重新计算核验。R07短程约15步技术检查不能混入正式实验表；当前best来自正式第16轮。
 
@@ -149,19 +200,36 @@ R01–R05的训练best日志、checkpoint的epoch/best_val_mae与独立重评一
 | R03 | 12 | 2000 | 12.5750 | 37.7194 | 0.7824 | DONE，退出码0 |
 | R04 | 11 | 2000 | 13.6800 | 36.0976 | 0.8008 | DONE；快照SHA256与最终best完全一致 |
 | R05 | 12 | 2000 | 10.5470 | 29.8706 | 0.8636 | DONE；快照SHA256与最终best完全一致 |
-| R07旧快照 | 1 | 2000 | 13.3415 | 36.7346 | 0.7937 | DONE；仅对应第1轮，当前第16轮best未测test |
-| R06/R08/R09 | — | — | — | — | — | 尚未启动，未评估 |
+| R07最终best | 16 | 2000 | 18.3190 | 48.8021 | 0.6358 | DONE，退出码0；完整逐图与SHA核验通过 |
+| R07旧快照（历史） | 1 | 2000 | 13.3415 | 36.7346 | 0.7937 | 阶段性旧权重，不用于最终同预算比较 |
+| P01 | 2 | 2000 | 19.4665 | 50.4593 | 0.6107 | DONE，退出码0；逐图独立核验通过 |
+| P02 | 14 | 2000 | 19.2080 | 51.6365 | 0.5923 | DONE，退出码0；路径/GT/三指标独立重算通过 |
+| R08 | 12 | 2000 | 13.6890 | 37.2070 | 0.7883 | DONE，退出码0；完整路径/GT/三指标/权重SHA核验通过 |
+| P03 | 5 | 2000 | 11.3380 | 35.4983 | 0.8073 | DONE，退出0；官方集合/GT/三指标独立核验通过 |
+| R06 | 5 | 2000 | 10.7340 | 30.7243 | 0.8557 | DONE，退出0；完整集合/GT/指标/权重SHA核验通过 |
+| R08-LC | 1 | 2000 | 11.1400 | 32.8648 | 0.8348 | DONE，退出0；完整集合/GT/指标/权重SHA核验通过 |
+| R08-GD | 25 | 2000 | 19.0240 | 49.7241 | 0.6219 | DONE；完整路径/GT/独立指标/权重SHA核验通过；修正核验脚本后完成 |
+| R08-GD-LC | 12 | 2000 | 15.4620 | 42.5036 | 0.7238 | DONE，退出0；完整路径/GT/重算指标/权重SHA核验通过 |
+| R06-ELC/R09/P04 | — | — | — | — | — | 尚无本报告已核验的test |
 
 R01/R02/R03共六份val/test结果已从逐图计数JSON独立重算MAE、RMSE、R²，与metrics文件一致，无重复图片；此前test核验图片集合与官方test一致、GT等于原annotation点数。
 
 | ID | test GPU | 时间（Asia/Shanghai） | 退出码 | 说明 |
 |---|---:|---|---:|---|
 | R01 | 0 | 2026-10-15 18:59:54–19:07:20 | 0 | 完整2000图 |
+| R06 | 3 | 2026-10-21 11:48:35–11:55:28 | 0 | 第5轮best，完整2000图及核验 |
+| R08-LC | 1 | 2026-10-21 11:48:35–11:55:52 | 0 | 第1轮best，完整2000图及核验 |
+| R08-GD-LC | 1 | 2026-10-22 13:58:28–14:07:58 | 0 | 第12轮best，完整2000图；共享GPU，实际推理约9分07秒 |
+| R08-GD | 2 | 2026-10-22 09:44:05–09:51:24推理；09:52:23修正核验通过 | 推理0；初次后处理1，修正核验0 | 第25轮best，完整2000图；未重跑推理，原失败状态保留 |
 | R02 | 1 | 2026-10-16 10:29:53–10:40:55 | 0 | 与其他任务共享GPU，峰值显存1584MiB |
 | R03 | 3 | 2026-10-15 17:26:54–17:33:34 | 0 | 完整2000图 |
 | R04 | 3 | 2026-10-16 15:40:32–15:50:52 | 0 | 部分训练预算best快照，完整2000图 |
 | R05 | 0 | 2026-10-16 15:40:32–15:51:14 | 0 | 部分训练预算best快照，完整2000图 |
 | R07 | 2 | 2026-10-16 15:40:32–15:52:43 | 0 | 部分训练预算best快照，完整2000图 |
+| R07最终best | 2 | 2026-10-17 22:29:35–22:36:54 | 0 | 第16轮固定权重，完整2000图 |
+| P02 | 2 | 2026-10-19 06:07:41整条pipeline结束 | 0 | 第14轮固定权重，完整2000图；单独test起止未核实，不填估计 |
+| R08 | 0 | 2026-10-19 11:13:24–11:21:15 | 0 | 第12轮最终best，完整2000图；实际推理日志约7分15秒 |
+| P03 | 3 | 2026-10-20 03:11:20–03:17:34 | 0 | 原pipeline自动测试；第5轮best、完整2000图 |
 
 2026-10-16阶段性test：按用户明确要求，15:40:32在GPU3/0/2并行评估R04/R05/R07当时val选出的best（第11/12/1轮），训练继续运行。启动前GPU剩余显存约12.7/6.9/7.2GiB（GPU0/2/3），此前同协议eval峰值约1.6GiB。每项输出单独保存为`<run>/test_snapshot_20261016_153930/`；使用复制并读取验证过的`checkpoint_best_snapshot.pth`，保存SHA256、快照时间/epoch/val指标、config及工作区代码diff，避免训练刷新best改变评估对象。后台进程使用独立session，日志/status/exitcode留在输出目录，不依赖SSH。清单见[parallel_test_snapshot_20261016_153930.json](../runs/tpc268_v3_exclude3/planning/parallel_test_snapshot_20261016_153930.json)。这些结果属于当前部分训练预算的快照，不替代最终30轮模型；不使用test挑epoch、阈值或后续参数。推理沿用原caption、3exemplars、整图、阈值0.23/0及2000张test；仅设置CPU线程数为2以控制并行资源占用。
 
@@ -169,43 +237,78 @@ R01/R02/R03共六份val/test结果已从逐图计数JSON独立重算MAE、RMSE�
 
 ## 8. 实验结果分析
 
-### 8.1 同文本的辅助训练配对
+### 8.1 同文本、同初始化、同预算的辅助训练配对
 
-`Δ=method−同caption baseline`，负的MAE/RMSE差值为改善。
+`Δ=method−matched baseline`，负的MAE/RMSE差值为改善。只报告val选出的同一权重，不从test更换epoch。
 
-| 配对 | split | ΔMAE | ΔRMSE | ΔR² | 当前解释 |
-| R02−R01 | val | +0.6837 | +2.5490 | -0.0124 | 验证三指标均退化，当前组合未获收益 |
-| R02−R01 | test | -0.2735 | +1.2994 | -0.0148 | MAE改善、RMSE/R²退化，存在取舍 |
-| R04−R03 | val | +1.1111 | +3.8985 | -0.0208 | 完成同30轮预算；单seed验证三指标均退化 |
-| R04−R03 | test | +1.1050 | -1.6218 | +0.0183 | 最终同权重：MAE退化、RMSE/R²改善 |
-| R07−R01 | val | +1.0671 | +9.6148 | -0.0525 | 第16轮best，R07训练未完成 |
-| R07快照−R01 | test | +0.6925 | +0.0914 | -0.0010 | 阶段性快照：三指标均未优于R01；训练未完成 |
+| 配对 | split | ΔMAE | ΔRMSE | ΔR² | 支持的观察 |
+|---|---|---:|---:|---:|---|
+| R02−R01 | val | +0.6837 | +2.5490 | -0.0124 | 完整辅助方案验证三指标退化 |
+| R02−R01 | test | -0.2735 | +1.2994 | -0.0148 | MAE小幅改善，RMSE/R²退化 |
+| R04−R03 | val | +1.1111 | +3.8985 | -0.0208 | 同species文本，验证三指标退化 |
+| R04−R03 | test | +1.1050 | -1.6218 | +0.0183 | MAE退化，RMSE/R²改善 |
+| R07−R01 | val | +1.0671 | +9.6148 | -0.0525 | contrast-only最终验证退化 |
+| R07−R01 | test | +5.6700 | +12.1588 | -0.1589 | contrast-only最终测试三指标退化 |
+| R08−R01 | val | -0.0150 | +3.0327 | -0.0148 | TT/TV-only最终MAE微降，RMSE/R²退化 |
+| R08−R01 | test | +1.0400 | +0.5637 | -0.0064 | TT/TV-only最终测试三指标退化 |
+| P02−P01 | val | -0.0390 | +4.3864 | -0.0223 | 仅mask修复，MAE微降，RMSE/R²退化 |
+| P02−P01 | test | -0.2585 | +1.1772 | -0.0184 | 仅mask修复，test也未全面改善 |
+| P03−P02 | val | -0.4094 | -3.0975 | +0.0161 | 修复mask条件下，仅初始化来源不同，三指标改善 |
+| P03−P02 | test | -7.8700 | -16.1383 | +0.2150 | 完整30轮/同val规则，FSC147初始化test三指标改善 |
 
-- **R02：结论需同时保留正负证据。** val MAE升高约6.8%，test MAE降低约2.16%，但test RMSE升高约3.55%、R²降低。不能将它概括为全面有效或全面无效；更不能把组合结果分别归因为contrast和Lorentz。test差异仅用于报告，不反向驱动后续方案选择。
-- **R04：同预算单seed未获得MAE收益。** 完成30轮后best-val MAE=10.7818，对应R03=9.6707；test MAE变差但RMSE/R²改善，需保留指标取舍，不能将组合结果分别归因于contrast或Lorentz。
-- **R05：缺少配对辅助方案。** 最终organ-only best-val MAE=10.4765，test MAE=10.5470；R06尚未启动，不能判断organ条件下辅助训练是否有效。
-- **R07：当前阶段尚未优于R01。** 完成21/30轮，第16轮best-val MAE=11.0701，对应R01=10.0030；需按原预算继续并重评，旧第1轮test不能替代当前best。
+**支持的结论**：当前seed42、初始化、输入、系数与预算下，R07的contrast-only没有整体计数收益，且test退化较大；R02/R04完整方法也没有获得配对val收益，test各指标存在取舍。现有证据不支持把完整方法写成“全面改善CountGD”。这些是当前设置的实测结论，不是统计等效检验，也不是所有对比学习/层级方法无效的证明。
 
-10月16日test快照的解释：R04相对同species文本R03的test MAE升高1.1050，但RMSE降低1.6218，反映指标取舍（逐图绝对误差697张改善、756张变差、547张相同）。R07旧第1轮相对同full-taxonomy文本R01的MAE升高0.6925、RMSE升高0.0914（531张改善、1064张变差、405张相同）。比较工具已核对相同数据/初始化/配置训练预算和推理协议；在10月16日测试时方法尚未完成30轮，原报告将其标为阶段性。10月17日R04完成30轮且最终best SHA与该快照相同，R04比较现已对应最终同预算选定权重；R07仍在训练且best已改变，其旧test保持历史阶段性身份。R05在这三组已测权重中MAE/RMSE最低，但caption不同且没有已完成R06配对，不能据此单独证明文本信息越少越好或辅助方案无效。后续选择仍只根据val，不因已查看test调整方案。
+R02测试优于R07，只是本seed的组合观察；它尚不能证明双曲几何本身带来收益。R08 TT/TV-only已完成，最终val相对R01仅MAE降低0.0150（0.1501%）、RMSE增加3.0327（11.4547%）；最终test MAE增加1.0400（8.2220%）、RMSE增加0.5637（1.5384%）、R²下降0.0064。当前层级蕴涵设置在本seed没有整体计数收益；但R09及同TT/TV-only目标的欧氏对照仍缺，不能从R07（没有TT/TV）的失败推出双曲蕴涵普遍无效，也不能从组合结果拆出几何效应。
 
-### 8.2 主文本与早期最佳现象
+### 8.2 R07退化集中在哪里：已有逐图预测的描述性诊断
 
-R03的best-val MAE=9.6707略低于full-taxonomy基线R01的10.0030，但RMSE分别为28.6010与26.4758；test MAE分别12.5750与12.6490，RMSE分别37.7194与36.6432。不能据此宣称更长的taxonomy文本更好，也不能把跨caption差异算成层级辅助训练收益。当前没有真正visual-only对照，无法隔离全部文本输入的贡献，也没有严格复现TPC论文的CountGD配方。
+完整2000张test，R07相对R01：730张绝对误差改善、693张变差、577张不变；总体MAE仍增加5.67，因为变差图像的误差增量更大。平均有符号误差（预测−GT）由R01的−5.400变为R07的−12.633，整体少计幅度加大。此处没有新推理或修改任何预测。
 
-| 已完成实验 | 最佳轮次 | best-val MAE / RMSE | 第30轮val MAE / RMSE |
-| R01 | 2 | 10.0030 / 26.4758 | 10.7017 / 35.3798 |
-| R02 | 3 | 10.6867 / 29.0248 | 11.6687 / 38.5785 |
-| R03 | 12 | 9.6707 / 28.6010 | 9.9129 / 31.2750 |
+按既定GT计数桶分析（GT计数不是每像素密度）：
 
-后期train loss下降但val未刷新best，与泛化停滞/退化相符；这不是“再增加epoch就会改善”的证据。也不足以确定失败机制是梯度冲突、辅助权重过强或双曲几何本身；这些目前都是待验证假设。
+| GT数量 | n | R01 MAE | R07 MAE | ΔMAE |
+|---|---:|---:|---:|---:|
+| [0,20) | 784 | 4.4579 | 3.4872 | -0.9707 |
+| [20,50) | 465 | 5.1419 | 4.0796 | -1.0624 |
+| [50,100) | 265 | 5.8528 | 5.9736 | +0.1208 |
+| [100,200) | 296 | 21.9865 | 46.5811 | +24.5946 |
+| [200,+∞) | 190 | 59.7526 | 87.5579 | +27.8053 |
 
-### 8.3 结论强度与剩余证据
+器官分组也显示异质性：
 
-只有seed42，不能主张稳定收益、统计显著、统计等效或所有条件下无效。各caption配对和单项诊断尚未全部完成；多seed、Euclidean几何对照及更细粒度密度/器官分组分析仍待条件满足后执行。合法锥率0、辅助loss下降只说明已记录的数值/机制检查，不能替代计数指标或证明实现无缺陷。
+| organ | n | R01 MAE | R07 MAE | ΔMAE |
+|---|---:|---:|---:|---:|
+| flower | 422 | 13.8649 | 10.4384 | -3.4265 |
+| fruit | 1069 | 8.3667 | 7.7933 | -0.5734 |
+| leaf | 11 | 15.1818 | 19.7273 | +4.5455 |
+| plant | 69 | 9.6957 | 7.7101 | -1.9855 |
+| seed | 317 | 29.7192 | 72.3817 | +42.6625 |
+| stoma | 112 | 2.1964 | 1.8571 | -0.3393 |
 
-![各caption内的逐轮val MAE](../runs/tpc268_v3_exclude3/planning/val_mae_curves_20261016.png)
+seed组R07平均有符号误差−69.6625，R01为−26.7350。高计数和seed组的大误差是本次总体退化的主要**描述性位置**；两种分组可能重叠，不能将它们当成独立原因。leaf只有11张，不作稳定趋势推断。此诊断是查看test后的分析，不用于改阈值、挑epoch、改损失系数或只选择有利组汇报。
 
-图中每点为一轮完整验证；三个panel按主caption分开，未作平滑或补点。R07尚无正式epoch点，未画入；此图仅对应本次报告快照。
+### 8.3 模型选择、文本和几何：哪些结论仍不支持
+
+- R07第16轮的val MAE低于其第1轮，但test MAE由旧快照13.3415升至18.3190，说明这个run的val排名没有保证test同步改善。仍保留预先规定的val选择第16轮；不能事后改报第1轮为最终模型。泛化退化/选择不一致与这些观察相符，但无法仅凭此确定过拟合、分布差异、梯度冲突、表示坍塌或权重过强是哪一个原因。
+- R03的val MAE最低（9.6707），R05的已完成基线test MAE/RMSE最低（10.5470/29.8706）；主文本不同，不能据单seed宣称organ-only普遍最好或taxonomy文本天然有害。organ-only仍是语义文本，尚无真正纯视觉对照。
+- R08已完成30轮，最终best-val MAE=9.9880，较R01低0.0150（0.1501%），但RMSE较高11.4547%；其test三指标也退化，不能声称稳定或全面提升。P01最终test MAE19.4665高于论文全分类文本参考16.90，尚未达到该参考；初始化、caption、缺链规则、mask与环境等协议边界仍需保留，不能将其与R01差值单独归因某一项。
+- Lorentz锥非法域率为0只说明已记录的数值检查；辅助loss下降和机制指标不能替代计数收益。R08已补齐test且三指标退化，仍缺同辅助目标的欧氏对照与预先选择的多seed配对，不能从本设置负结果推广到双曲几何普遍有效或无效。
+
+R08/P01/P02/P03均已完成固定预算和best测试，P03−P02初始化来源控制已补齐。下一步由P04完成后与P03配对比较prompt策略；本次核验已有GPU3自动测试，未启动重复推理或新训练，未更改任何在训实验。R06后按10月20日用户明确要求准备20轮命令（未启动，见文末）；R09仍按val门槛和研究问题决定，不因test退化扫lambda、挑seed或扩展实验填卡。 P04已获用户授权，独立实现organ-only主caption配对基线，10月19日15:51快照为GPU2完成4/30、正在第5轮，本次未重查；完整设置、状态及探索性边界见文末记录。
+
+### 8.4 P01/P02/P03：mask与初始化的控制结论（2026-10-20更新）
+
+P01/P02均完成30轮、共享GroundingDINO Swin-B初始化和同一纯七级文本/官方精确名称协议；核对运行protocol，核心源码仅exemplar方法不同，其余数据适配/配置/资产/依赖/推理一致。P02修复mask后，val MAE仅降0.3570%，RMSE升16.3139%；test MAE降1.3279%，RMSE升2.3330%，R²也退化。因此修复具有正确性依据，但当前seed的实验不支持它带来全面性能增益；它没有消除P01/P02与R01的差距，不能把此前差距主要归因该bug。P01/P02的best来自各自固定val MAE规则，不同轮次不是额外训练预算。
+
+P03与P02模型/数据/文本/配置/环境/修复mask一致，仅把GroundingDINO换成FSC147 CountGD初始化，严格加载1146项model参数/缓冲区，optimizer/scheduler/RNG独立创建。P03已完成30/30，第5轮best最终val=10.485485485485485/28.17653131449854/0.9306738112230415、test=11.338/35.49826756336145/0.807312750302844。相对P02，val MAE降3.7578%、RMSE降9.9042%，test MAE降40.9725%、RMSE降31.2536%、R²增加0.2150。两组固定预算、同一val选择规则的三指标均改善，支持FSC147预训练CountGD初始化在当前修复mask的P协议/seed42下优于GroundingDINO初始化，且影响大于本次mask修复观察到的变化。
+
+此结果是初始化来源控制的实测收益，不应推广为所有seed/初始化/数据集都成立；也不能说已逐项解释R01全部优势，因为R01的caption、环境和名称解析等仍不同。P03−P02限于修复mask条件，P03−P01仍同时变化初始化和mask，三组不能识别完整mask×初始化交互。P04对照只改变主caption，等待其固定预算结果再判断输入策略，不从test反向调整超参数。
+
+### 8.5 完整逐轮验证曲线与数据来源
+
+![所有已完成epoch的val MAE；P01独立面板](../runs/tpc268_v3_exclude3/planning/val_mae_curves_results_20261017.png)
+
+原始逐轮点、无平滑或补点，星号为各run最低val MAE。这张曲线为2026-10-17历史快照，不包含10月18新增轮次/P02；最新状态以第5–7节、[2026-10-19 11:03核验快照](../runs/tpc268_v3_exclude3/planning/results_verified_20261019.json)及其后完成的[R08最终test核验](../runs/tpc268_v3_exclude3/entailment_seed42/test_final/verified.json)、[P03最终test核验](../runs/tpc268_p03_fsc147_init_20261018/test/verified.json)为准。P01单列，避免与R01协议混淆。核验产物：[最终配对](../runs/tpc268_v3_exclude3/planning/test_full_taxonomy_final_20261017.json)、[R07逐图/分组核验](../runs/tpc268_v3_exclude3/planning/r07_final_test_verified_20261017.json)、[状态快照](../runs/tpc268_v3_exclude3/planning/report_results_verified_20261017.json)。
 
 ## 9. 代码、环境、产物与可追溯性
 
@@ -221,7 +324,7 @@ R03的best-val MAE=9.6707略低于full-taxonomy基线R01的10.0030，但RMSE分�
 | R05 | `8a26e86` | has uncommited changes | 以保存的配置/checkpoint及已有源码快照共同复核 |
 | R07 | `8a26e86` | has uncommited changes | 以保存的配置/checkpoint及已有源码快照共同复核 |
 
-R01/R02/R03在`9df0651`且dirty的工作区启动，不代表它们用了未排除三图的旧数据协议；实际保存配置和checkpoint均记录了三张排除名单、当前坐标策略和有效registry fingerprint。本次已核对这些字段，但缺乏每次启动的完整不可变源码归档，不能仅凭HEAD声称逐字节复现。当前`8a26e86`也有工作区改动：transformer.py将禁用autocast的旧API替换为`torch.amp.autocast('cuda', enabled=False)`；该语义兼容改动已为R02 test单独存diff，本次不修改它。
+R01/R02/R03在`9df0651`且dirty的工作区启动，不代表它们用了未排除三图的旧数据协议；实际保存配置和checkpoint均记录了三张排除名单、当前坐标策略和有效registry fingerprint。本次已核对这些字段，但缺乏每次启动的完整不可变源码归档，不能仅凭HEAD声称逐字节复现。当前HEAD为`6341592d13575f3626bc70f08604b96ab231f4ef`；相对R07启动记录8a26e86，模型代码差异仅为transformer.py禁用autocast的API替换，另有未启用的候选异名JSON。R07最终test的工作区代码diff为空，实际使用协议与逐图caption已经与R01核对；历史dirty启动缺乏全部不可变源码，因此不声称所有旧run源码逐字节一致。
 
 | ID | 相对实验根目录的run | 准确启动脚本 | 主要证据 |
 | R01 | `full_baseline_seed42/` | `run_r01.sh` | `full_baseline_seed42/config_args_all.json`、`log.txt`、`console.txt`、`checkpoint_best_regular.pth`（若已生成） |
@@ -230,6 +333,9 @@ R01/R02/R03在`9df0651`且dirty的工作区启动，不代表它们用了未排�
 | R04 | `species_method_seed42/` | `run_r04.sh` | `species_method_seed42/config_args_all.json`、`log.txt`、`console.txt`、`checkpoint_best_regular.pth`（若已生成） |
 | R05 | `organ_baseline_seed42/` | `run_r05.sh` | `organ_baseline_seed42/config_args_all.json`、`log.txt`、`console.txt`、`checkpoint_best_regular.pth`（若已生成） |
 | R07 | `contrast_seed42/` | `run_r07.sh` | `contrast_seed42/config_args_all.json`、`log.txt`、`console.txt`、`checkpoint_best_regular.pth`（若已生成） |
+| R08 | `entailment_seed42/` | `run_r08.sh`、`run_r08_test_final.sh` | best epoch11；`val/`及`test_final/`的metrics、counts、checkpoint_metadata、verified、status/exitcode、SHA和源码记录 |
+| R08-GD | `entailment_groundingdino_seed42/` | `run_r08_groundingdino.sh`、`run_r08_groundingdino_test.sh` | best epoch24；`val/`及`test_final/`完整指标/逐图计数、SHA、源码/依赖核验；首次后处理失败及修正证据保留 |
+| R08-GD-LC | `entailment_groundingdino_learnable_seed42_e20/` | `run_r08_groundingdino_learnable_e20.sh`、`run_r08_groundingdino_learnable_test.sh` | best epoch11，c=0.63181096；`val/`及`test_final/`完整指标/逐图计数、SHA、源码/依赖与完整集合核验 |
 
 - 最佳checkpoint：`<run>/checkpoint_best_regular.pth`；latest：`<run>/checkpoint.pth`。训练根目录`val_metrics.json`通常是末轮，**最终比较只使用`<run>/val/val_metrics.json`**。本报告运行中best取训练日志并核对best checkpoint，而不把根目录末轮指标冒充best。
 - 独立重评：`<run>/val/val_metrics.json`、`val_counts.json`；test：`<run>/test/test_metrics.json`、`test_counts.json`、`checkpoint.sha256`、`run_test.sh`、`status`/`exitcode`。R01/R02配对test比较在`R01_R02_test_comparison.json`。
@@ -245,6 +351,7 @@ R01/R02/R03在`9df0651`且dirty的工作区启动，不代表它们用了未排�
 | R03 | [val_metrics.json](../runs/tpc268_v3_exclude3/species_baseline_seed42/val/val_metrics.json) | [test_metrics.json](../runs/tpc268_v3_exclude3/species_baseline_seed42/test/test_metrics.json) | [test_counts.json](../runs/tpc268_v3_exclude3/species_baseline_seed42/test/test_counts.json) |
 | R04最终best | [val_metrics.json](../runs/tpc268_v3_exclude3/species_method_seed42/val/val_metrics.json) | [test_metrics.json](../runs/tpc268_v3_exclude3/species_method_seed42/test_snapshot_20261016_153930/test_metrics.json) | [test_counts.json](../runs/tpc268_v3_exclude3/species_method_seed42/test_snapshot_20261016_153930/test_counts.json) |
 | R05最终best | [val_metrics.json](../runs/tpc268_v3_exclude3/organ_baseline_seed42/val/val_metrics.json) | [test_metrics.json](../runs/tpc268_v3_exclude3/organ_baseline_seed42/test_snapshot_20261016_153930/test_metrics.json) | [test_counts.json](../runs/tpc268_v3_exclude3/organ_baseline_seed42/test_snapshot_20261016_153930/test_counts.json) |
+| R07最终best | [val_metrics.json](../runs/tpc268_v3_exclude3/contrast_seed42/val/val_metrics.json) | [test_metrics.json](../runs/tpc268_v3_exclude3/contrast_seed42/test_final/test_metrics.json) | [test_counts.json](../runs/tpc268_v3_exclude3/contrast_seed42/test_final/test_counts.json) |
 | R07快照 | 第1轮正式训练val日志及snapshot_metadata.json | [test_metrics.json](../runs/tpc268_v3_exclude3/contrast_seed42/test_snapshot_20261016_153930/test_metrics.json) | [test_counts.json](../runs/tpc268_v3_exclude3/contrast_seed42/test_snapshot_20261016_153930/test_counts.json) |
 
 ## 10. 后续持续更新规则
@@ -269,7 +376,15 @@ R01/R02/R03在`9df0651`且dirty的工作区启动，不代表它们用了未排�
 
 核对R04/R05退出码、30轮日志、最终best元数据和999图独立重评，重算val指标并确认最终best与既有test快照SHA256一致；核对R07当前第16轮best和21轮完成进度。采集原始状态/逐epoch日志见[report_snapshot_20261017.json](../runs/tpc268_v3_exclude3/planning/report_snapshot_20261017.json)，更新的未平滑曲线见[val_mae_curves_20261017.png](../runs/tpc268_v3_exclude3/planning/val_mae_curves_20261017.png)。按用户要求优先论文基线核验，记录初始化等公开信息缺项；未启动新训练，未修改已有实现、配置、数据或进程。
 
+
+
+### 2026-10-17 最终test结果维护记录（2026-10-17T22:46:00+08:00）
+
+R07最终test DONE、exitcode=0；第16轮权重SHA256=`37ae8b38f4b59b3789539e89d42b05f1aaaa586e031d0c618780f7308457fe04`与运行前记录及运行后检查一致。全部2000张路径唯一、集合等于官方test，每张GT等于原annotation点数；MAE/RMSE/R²独立重算一致。compare_tpc268_runs验证R01/R02/R07同caption、冻结、seed、初始化来源、30轮预算及训练/推理协议；R07实际eval代码提交6341592，与启动源码差异和溯源边界见第9节。本次只更新结果表、当前结论、分组诊断与曲线，不启动训练/测试或修改模型、数据、配置。R08/P01的best轮次已读checkpoint核对，训练状态依最近日志；实时GPU/进程查询因自动审批服务403未执行。历史启动与检查记录继续保留，均以当时的日期/状态理解，当前结论以第1–9节为准。
+
 ## 附录 A：后续实验计划与命令（2026-10-17优先级修订）
+
+当前状态以本节表及文末R07完成决策为准；下方作者配方核查段落是当日早期快照，用户随后已确认P01假设并启动，见P01节。
 
 **2026-10-17优先级补充：用户随后明确要求先提供R08启动命令。** 本次已准备原计划R08的GPU0后台脚本，READY但未执行；R07继续原训练，R06/R09仍不自动展开。P01论文Table 4“3 visual exemplars＋full taxonomy”的初始化和监督配方缺项继续保留，P01训练尚未启动，不能把R08或猜测配置称作论文完全复现。
 
@@ -285,11 +400,12 @@ R01/R02/R03在`9df0651`且dirty的工作区启动，不代表它们用了未排�
 
 | 优先级 | ID | 状态 | 配置 / 输出run ID | 对照与问题 | 启动条件 |
 |---|---|---|---|---|---|
-| P1 | R07 | RUNNING | cfg_tpc268_contrast.py / contrast_seed42 | 对R01：contrast单独是否改善计数？ | 已在GPU2运行；短程已通过，正在正式30轮训练 |
-| P0 | P01 | WAITING_AUTHOR_PROTOCOL | tpc268_paper_reproduction_20261017 / protocol_audit.json | 复现论文Table 4全分类文本基线 | 先核实初始化/监督/训练推理配方；未启动 |
-| P1（用户明确先启动） | R08 | READY | cfg_tpc268_entailment.py / entailment_seed42 | 对R01：TT/TV单独是否改善计数？ | 执行下方run_r08.sh；先独立短程通过，再正式30轮 |
+| P1 | R07 | DONE；最终test DONE | cfg_tpc268_contrast.py / contrast_seed42 | 对R01：contrast单独是否改善计数？ | 下一步GPU2评估第16轮最终best的test |
+| P0 | P01 | RUNNING | tpc268_paper_reproduction_20261017 / protocol_audit.json | 用户确认假设下重建论文全分类文本基线 | GPU3运行，原mask、GroundingDINO初始化，详见P01节 |
+| P1 | R08 | RUNNING（日志） | cfg_tpc268_entailment.py / entailment_seed42 | 对R01：TT/TV单独是否改善计数？ | 完成9轮、正在第10轮；继续既定30轮 |
+| P1 | P02 | READY | tpc268_p02_maskfix_20261017 / worktree/run_p02.sh | 同P01仅修复exemplar padding/mask | GPU2预检通过，正式训练未启动；使用文末命令 |
 | P2 | R09 | BLOCKED | cfg_tpc268_euclidean.py / euclidean_seed42 | 同完整辅助目标换几何，隔离Lorentz价值 | R02最终best-val及R07/R08结果就绪，且蕴涵或组合显示潜力；若仍要检验/主张几何差异则必做 |
-| P2 | R06 | BLOCKED | cfg_tpc268_organ_full.py / organ_method_seed42 | 配对R05，检查弱主文本下辅助收益 | R05完成，且R04或单项诊断有候选收益；若所有组合/单项均退化则不自动展开 |
+| 用户指定 | R06 | READY（10月20日，未启动） | cfg_tpc268_organ_full.py / organ_method_seed42_e20 | 配对R05前20轮，检查弱主文本下辅助收益 | 用户明确要求执行原设置但预算20轮；只准备启动命令，覆盖原自动调度门槛，不代表候选收益门槛已满足 |
 | P3 | 纯视觉控制 | BLOCKED | 尚未实现，不提供伪启动命令 | 控制所有语义文本输入，解释文本条件的贡献 | 主损失诊断后单独确定并验证真正visual-only路径；不以空caption或organ模式冒充 |
 | P3 | R10–R19 | BLOCKED | seed43/44扩展 | 检查候选收益稳定性 | 见附录C，不再按原计划默认跑满13–19组 |
 | P3 | A01 no-TT-bridge | BLOCKED | bridge_weight=0.0，新run | 仅删除TT bridge | 只有蕴涵已表现出可重复价值且需解释bridge时考虑；当前预算不展开 |
@@ -482,3 +598,501 @@ nohup setsid bash runs/tpc268_paper_reproduction_20261017/worktree/run_reproduct
 现在已启动，勿重复执行nohup命令。监控：`tail -f runs/tpc268_paper_reproduction_20261017/train.console.log`（在主仓库根目录执行）；阶段：`cat runs/tpc268_paper_reproduction_20261017/stage`。此次仅创建独立复现工作树和新环境/权重，没有改动已启动R07/R08、主工作树原有模型修改、数据及标注。原始b6核心文件仍逐字节相同。作者未公开的训练细节仍未知，本次是明确假设下的复现，不据当前准备结果宣称复现论文性能。
 
 2026-10-17 清理记录：按用户明确要求，仅删除P01 preflight/checkpoint.pth和preflight/checkpoint_best.pth两个预检权重，实际删除2个文件，共2500235378字节（约2.33GiB）。正式训练独立从GroundingDINO初始化，不读取这两个文件；正式train权重、审计JSON、检查日志、数据、标注和实验协议未变。
+
+
+## 2026-10-17 R07完成后的下一步（核查：2026-10-17T22:18:34+08:00）
+
+R07 status=DONE 2026-10-17T20:46:36+08:00、exitcode=0、正式日志30行；checkpoint epoch=15（第16轮），best_val_mae=11.07007007007007。最终999张best-val逐图重算MAE=11.07007007007007、RMSE=36.09060170642118、R²=0.8862607095040076，与日志和独立重评一致。相对同协议R01 val MAE增加1.0671，本seed此协议下contrast-only未改善val；旧test仅为第1轮快照。
+
+R08完成8/30、正在第9轮，当前best第5轮，val MAE=11.35935935935936、RMSE=30.388080482903746、R²=0.91936403173151，尚未完成预算。P01仍在GPU3训练。R06要求R04或单项诊断有候选收益，当前尚无；R09要求R07/R08最终结果及蕴涵/组合潜力或明确几何检验目标，R08仍未完成。因此不释放新的30轮训练，下一步先补齐R07最终best的test，并等待R08/P01；不根据test选择后续训练。
+
+已准备 `runs/tpc268_v3_exclude3/run_r07_test_final.sh`，shell及内嵌Python语法检查通过，READY、未启动。固定GPU2并要求至少4096MiB空闲，核对训练成功退出和第16轮权重身份，锁防重复，记录权重前后SHA256及代码diff。沿用原R07 caption、taxonomy、初始化来源、数据/整图推理协议、阈值.23/0、3 exemplars、实际eval batch1；CPU线程2/worker2仅控制评估资源。结果写contrast_seed42/test_final/，保留第1轮旧快照，结束核对完整2000张test与有限指标。当前test指标未知，没有修改已有训练、模型配置或数据。
+
+```bash
+cd /home/new_space_1/new_space_1_for_lijiahui/research/CountGD
+nohup setsid bash runs/tpc268_v3_exclude3/run_r07_test_final.sh > runs/tpc268_v3_exclude3/contrast_seed42/test_final.console.log 2>&1 < /dev/null &
+```
+
+监控：`tail -f runs/tpc268_v3_exclude3/contrast_seed42/test_final.console.log`。本次仅提供命令，未启动新test/训练。核查快照：planning/next_step_20261017_r07_final.json。
+
+
+2026-10-17 R07最终test启动脚本修复：用户SSH环境不包含编辑器扩展目录中的rg，原脚本以rg检查DONE导致错误地报告训练未完成。实际原训练status=DONE、exitcode=0，评估此前未启动，test_final/仅有锁文件。将检查改成Bash内置read和条件判断，避免rg依赖；提前注册退出处理，使后续启动检查失败也记录FAILED/exitcode。bash语法、两段内嵌Python语法及PATH=/usr/bin:/bin下的真实训练状态检查均通过。仅修复启动兼容性，不修改权重、caption、数据、推理阈值或实验协议；保留失败console日志，接下来重启原定GPU2评估，实际状态待启动日志核实。
+
+2026-10-17 R07最终test修复后启动核实：RUNNING 2026-10-17T22:29:35+08:00，后台PID377476，GPU2，实际评估代码HEAD=6341592d13575f3626bc70f08604b96ab231f4ef（不是旧训练启动HEAD）。checkpoint_metadata.json已核对第16轮/val MAE11.07007007007007；console已输出TPC-268 test [130/2000]真实推理进度，无原rg错误。正式test性能仍未知、评估未完成；沿用原定权重和评估协议。无需用户重复启动，查看同一test_final.console.log即可。
+
+
+## 2026-10-17 下一项实验建议：P02 mask配对对照（PROPOSED；2026-10-17T22:52:43+08:00）
+
+本节是针对用户“下一步应该进行什么实验”的建议，尚未实现或启动，不表示已获得性能或已释放旧R06/R09门槛。最新日志：R08完成9/30、正在第10轮，best第5轮val MAE11.35935935935936；P01完成10/30、正在第11轮，best第2轮val MAE10.933933933933934。当前已运行实验保持原设置完成。
+
+若新增一项正式训练，优先P02：P01的配对CountGD基线，只将视觉exemplar插入改为去padding→插入→重新padding，并同步正确token/attention mask。其余沿用P01：同一官方GroundingDINO Swin-B权重哈希、原b6模型/计数目标、无contrast/TT/TV、官方精确名称七级文本/缺失回退species且无手工异名、三图代码排除、6998/999/2000、Python3.9.19/torch2.2.1/transformers4.39.1、train/eval batch4、seed42、30轮、冻结/优化器/学习率/增强/推理阈值相同。修复须在独立工作树最小移植并核对diff，不把main环境或eval batch1顺带带入；正式训练独立从GroundingDINO开始，不续训P01。P01继续保留原bug用于原版设置复现。
+
+P02目的是回答已知padding/mask错误在P01协议下的影响。主要比较各自val MAE选择的best，报告同权重RMSE/R²及完整曲线；先用val判断，不提前看P02 test挑方案。P01/P02均完成固定预算后，才用各自冻结best做完整test。不要将P02与FSC147初始化/不同caption的R01直接比较并归因mask；单seed配对也不证明普遍效应。P02结果未知，无预设改善方向。
+
+同时可用已有val逐图输出按预定GT计数桶/organ检查R01与R07的少计是否在val也存在，这是无需新训练的描述性诊断；不根据已看到的test改loss系数、阈值或挑旧epoch。当前不优先扩展organ完整方法或full几何对照。若R08最终出现val收益，再考虑相同TT/TV-only目标的欧氏配对（区别于R09 full目标）；若没有收益，保留负结果，下一轮先建立固定基线再决定机制改动或预先指定的多seed确认。
+
+
+## 2026-10-17 P02启动准备（PREPARING）
+
+用户要求P02启动命令。已从P01固定提交492688c创建独立分支repro/tpc268-p02-maskfix和工作树runs/tpc268_p02_maskfix_20261017/worktree；只改GroundingDINO.add_exemplar_tokens的padding/mask处理，其余52份核心源文件原样，groundingdino.py方法外逐字节核对。数据适配/增强/配置/依赖锁保持P01一致，入口核对P01的资产、初始化、配置、环境、全部67个实际依赖版本及原CUDA扩展SHA；不改变P01、R08或main模型。共享P01锁定.venv与CUDA扩展，只读使用；保留P01 audit/protocol.json、environment.json及环境。
+
+混合caption屏蔽padding、真实token/特征插入、梯度、同长度无padding与原版等价的CPU检查已通过。GPU2本次实测空闲24124MiB；GPU短程15批+999val仍待验证。正式P02训练尚未启动，指标未知；与早期PROPOSED记录区分。脚本为独立工作树run_p02.sh，固定GPU2、要求22000MiB空闲，无rg依赖；通过配对检查后按P01预算从GroundingDINO独立训练30轮，随后best-val和一次test。P02没有辅助损失或新超参数，不把main eval batch1带入，train/eval均为4。完整协议和后台命令见该工作树两个docs；准备完成后更新状态。
+
+
+## 2026-10-17 P02已准备：READY，正式训练未启动
+
+代码固定为d521714b4515d07688a8686b34a03514842be56c（repro/tpc268-p02-maskfix）。配对协议指纹de263a0557b393fe8f02497798f3fc4331d95cc0bc66574346a21a5a8337f224，引用P01指纹fb63d9616f2f98f85ea17eb75352405d1fb048d4e75334c7b8d6d7acca1e84e8。逐项核对53份核心源码，只有exemplar方法改动；其余适配/配置/资产/初始化/67项实际依赖/算子哈希相同。GPU2真实预检15批训练+999图val完成、exitcode0、有限日志/梯度/正确mask/原版无padding等价及checkpoint保存通过；audit/preflight指纹相同。证据为runs/tpc268_p02_maskfix_20261017/readiness.json与preflight/，不是正式结果。
+
+短程技术检查val MAE=36.269269269269266、RMSE=59.023917379506614、R²=0.6957866074722191，仅供核查，不进入正式性能表、不据此调参。正式P02尚未启动，训练0/30，正式val/test和best轮次未知；启动后独立重置seed42并加载官方GroundingDINO，绝不续用P01/预检权重。P01/P02仅mask处理不同，已有P01/R08保持原训练。
+
+启动命令（固定GPU2，至少22000MiB空闲，nohup+setsid防SSH断开，锁防重复）：
+
+```bash
+cd /home/new_space_1/new_space_1_for_lijiahui/research/CountGD
+nohup setsid bash runs/tpc268_p02_maskfix_20261017/worktree/run_p02.sh > runs/tpc268_p02_maskfix_20261017/pipeline.console.log 2>&1 < /dev/null &
+```
+
+预检已经完成，启动仍重核数据/协议并复用一致预检，然后正式30轮→best-val重评→固定best的2000图test。监控阶段：`tail -F runs/tpc268_p02_maskfix_20261017/pipeline.console.log`；训练明细：`tail -F runs/tpc268_p02_maskfix_20261017/train.console.log`（检查通过后生成，-F会等待文件）。结果根目录runs/tpc268_p02_maskfix_20261017/。P02通过.venv链接复用P01锁定环境，保留P01工作树.venv、audit/protocol.json和environment.json；不执行uv sync/install。
+
+
+## 2026-10-18 训练状态更新（2026-10-18T10:24:10+08:00）
+
+宿主机后台主进程R08/P01/P02=4037155/4079418/431449，GPU计算进程4041756/4084068/431915分别位于GPU0/3/2，已只读核实。当前R08完成19/30、正在第20轮；best checkpoint epoch11（第12轮），val MAE9.987987987987989、RMSE29.508520002750945、R²0.9239643740684884。P01完成21/30、正在第22轮；best epoch1（第2轮），val10.933933933933934/26.88757969661721/0.9368714679409043。P02已由用户启动，stage=TRAINING 2026-10-17T23:30:34+08:00，完成10/30、正在第11轮；best epoch5（第6轮），val11.05005005005005/30.248106518391328/0.9201051737165991。三份best元数据与正式逐轮日志对应一致，全部val999张，均是阶段性结果；尚无三项最终test。
+
+R08主指标比R01低约0.0150但RMSE较差，继续原预算，不宣称全面或稳定提升；P01/P02完成预算不同，不对mask修复收益下结论。此次仅更新状态/指标，不修改训练、配置、数据或推理协议。原计划门槛、30轮预算和val选择规则保持。核查快照：runs/tpc268_v3_exclude3/planning/training_status_20261018.json。旧READY/PREPARING及10月17日的审批403记录为历史时点，本次进程/GPU核查已成功。
+
+
+## 2026-10-18 下一项建议：P03初始化来源对照（PROPOSED；2026-10-18T20:33:01+08:00）
+
+用户说明GPU3已空闲并询问下一项实验。本次核实P01完成30轮，pipeline DONE 2026-10-18T19:43:01+08:00且exit_code=0；第2轮best的独立val为10.933933933933934/26.88757969661721/0.9368714679409043，最终test2000张为19.4665/50.45931529460145/0.6106668647985156。全部test路径唯一且等于官方集合，每张GT等于原点标注，三指标独立重算一致。R08完成27轮、正在28轮，best仍第12轮；P02完成20轮、正在21轮，best更新为第14轮，val10.894894894894895/31.2739837894385/0.914593940870526。P02预算尚未完成，不能先判断mask效应。
+
+建议P03配对P02，仅改变初始化来源：由官方GroundingDINO Swin-B改为本地checkpoints/checkpoint_fsc147_best.pth（FSC147预训练CountGD权重，文件已核实存在；不是随机初始化，也不是续训已有TPC checkpoint）。保持P02的mask修复、b6模型、无辅助损失、纯七级caption/缺链species/无手工异名、三图排除、6998/999/2000、Python3.9.19/torch2.2.1/transformers4.39.1、train/eval batch4、seed42、30轮、冻结/优化/增强/阈值/后处理全部相同。只加载模型权重，optimizer/scheduler/训练随机状态重新初始化；实现准备时需严格核对共享参数与初始化键兼容性，不静默跳过未知缺失键。
+
+P03−P02用于估计**修复mask协议下**初始化来源的影响；P02−P01用于观察GroundingDINO初始化下mask处理的影响。不能用P03−P01单独归因初始化（两因素不同），也不能从这三个单元推断完整mask×初始化交互。R01与P01在caption、mask、环境、名称解析等也不同，因此不能把已有test差值6.8175直接归因FSC147。这一控制问题来自此前已明确的初始化缺项；P03是在已经查看test后提出的探索性协议核验，不包装为预注册或独立确认性结果，不因test调参数、阈值或选epoch。
+
+P03先按固定30轮与val MAE选择规则对照P02，并报告同权重RMSE/R²及曲线；阶段性指标不同不提前下因果结论。预训练来源是否改善是未知结果，不能预填预期分数。用户本次仅询问建议，P03状态PROPOSED，尚无已实现启动脚本/代码提交，未启动训练。计划分配GPU3（空闲由用户说明，正式启动前重新核实）；不改R08/P02，不因空卡自动扩展R06/R09或扫辅助loss。R08仅有val MAE约0.015的微小改善，几何/多seed结论仍待完成预算和匹配控制。
+
+
+## 2026-10-18 P03 初始化配对实验（PREPARING；2026-10-18T20:40:29+08:00）
+
+用户已授权在GPU3后台启动。run ID=tpc268_p03_fsc147_init_20261018，独立分支repro/tpc268-p03-fsc147-init，从P02提交d521714b4515d07688a8686b34a03514842be56c创建；P03实际提交、PID及训练指标待启动核实。GPU3启动前实测24124MiB空闲，磁盘2.1TiB可用。
+
+P03仅把P02官方GroundingDINO Swin-B初始化换为checkpoints/checkpoint_fsc147_best.pth（FSC147预训练CountGD），SHA256=c1bab864b17db345b4c6e3aaabb5765bc2c0a90d0bc8defb5e664a74a50aa126。模型全部参数/持久buffer要求严格键名和shape匹配；仅加载model，重新seed42、AdamW及StepLR，不加载FSC/TPC/预检optimizer、scheduler或随机状态。P02其余协议不变：已修复mask、原CountGD无辅助loss、官方精确名称七级逗号文本+句点，缺链只用species，无手工异名；三图在代码层排除，原数据/标注不改，split6998/999/2000；30轮、FP32、train/eval batch4、worker4、freeze backbone.0/bert、lr1e-4/wd1e-4/StepLR10/clip0.1、原增强和2px中心监督；整图800/1333、eval3 exemplars、阈值.23/0，无NMS/裁剪/SAM/数量校正。
+
+入口核对P02 audit/protocol.json的53份核心源码、数据适配/增强/配置/依赖锁、资产、除initialization外全部配置、Python/torch/CUDA/mask/推理描述；只允许初始化与记录机制变化。共享P01的Python3.9.19/torch2.2.1+cu121/torchvision0.17.1+cu121/transformers4.39.1锁定环境，核对67项依赖和CUDA扩展SHA，uv显式指定解释器，不安装或同步。保留P01的.venv及environment.json和P02 audit/protocol.json作为依赖，不更改R08/P02。
+
+固定GPU3，nohup+setsid防SSH断连，flock防重复启动，要求22000MiB空闲。流程audit→15训练批预检+完整999val及保存→重新初始化正式30轮→val选best复评→一次2000test。preflight只是技术验证，不纳入正式结果。已有test已公开，本次是探索性初始化来源控制；P03−P02仅解释修复mask协议下初始化效应，P02−P01仅解释GroundingDINO下mask效应，不能从三组推出完整交互或用P03−P01单独归因初始化。R06/R09门槛保持。
+
+后台启动：
+```bash
+cd /home/new_space_1/new_space_1_for_lijiahui/research/CountGD
+nohup setsid bash runs/tpc268_p03_fsc147_init_20261018/worktree/run_p03.sh > runs/tpc268_p03_fsc147_init_20261018/pipeline.console.log 2>&1 < /dev/null &
+```
+阶段日志：`tail -F runs/tpc268_p03_fsc147_init_20261018/pipeline.console.log`；预检：`tail -F runs/tpc268_p03_fsc147_init_20261018/preflight.console.log`；正式：`tail -F runs/tpc268_p03_fsc147_init_20261018/train.console.log`。结果根目录同run ID。尚无正式val/test/best轮次。
+
+
+### 2026-10-18 P03 后台启动核实（2026-10-18T20:41:38+08:00）
+
+后台主进程PID1510920、PPID1、SID1510920、TTY=?已在宿主机核实，nohup+setsid独立运行。固定GPU3；源码提交2e964cdb9ef1ec6c02f3c4438bf1863ba3eea49b，启动worktree.diff为空。AUDIT于20:40:47开始并完成，PREFLIGHT于20:41:08开始；当前仍为技术预检，正式epoch0/30。数据6998/999/2000、完整链6258/943/1895及回退740/56/105已核对。配对指纹c9a750ff0e49ba0be91c130eebd31f79fa03a3aaf90da26768e65bac63d159fe；P02参考指纹de263a0557b393fe8f02497798f3fc4331d95cc0bc66574346a21a5a8337f224，模型53文件/配置/资产/依赖/算子检查通过。严格初始化加载与实际GPU训练/val仍待预检产物，正式best/val/test未知。早期PROPOSED/PREPARING仅是历史时点。
+
+
+### 2026-10-18 P03 正式训练已启动（2026-10-18T20:46:07+08:00）
+
+状态TRAINING，正式训练开始2026-10-18T20:45:05+08:00，当前第1/30轮（日志epoch0，已输出step20/1749）；0轮完整train+val完成，正式best/val/test均未知。GPU3实测占用7824MiB；后台PID1510920、训练PID1514919，PPID1/SID1510920/无TTY，SSH断开后继续运行。启动源码2e964cdb9ef1ec6c02f3c4438bf1863ba3eea49b，运行后仅追加文档状态说明，运行代码不改。
+
+预检15批+完整999val及checkpoint保存已成功，1146项参数/持久buffer严格加载，缺失/额外/shape不符均0；mask/padding/插入梯度/同长度原版等价检查通过。audit/preflight/train指纹均c9a750ff0e49ba0be91c130eebd31f79fa03a3aaf90da26768e65bac63d159fe。预检技术结果MAE12.8008008008008、RMSE40.12493003121638、R²0.8594111606536942，不是正式最佳性能，不能纳入正式结果表。正式进程重新加载原FSC147，仅model；独立seed/optimizer/scheduler，首批loss280.8177与预检首批一致，而非从预检15批续训。正式loss日志有限，目前未出现报错。
+
+记录：runs/tpc268_p03_fsc147_init_20261018/launch_verified.json。自动按30轮固定预算完成，再以val MAE选择best并重评val及一次2000test，无需再次启动。main及本工作树两份docs均已同步，P02/R08未修改。阶段监控pipeline.console.log，正式训练监控train.console.log；后台启动命令见上，当前不要重复执行。
+
+
+## 2026-10-19 R08/P02完成后的结果核查（2026-10-19T11:03:11+08:00）
+
+R08于2026-10-18T23:35:27+08:00正常退出0，30条完整训练/val日志，best checkpoint epoch11（第12轮）及独立val一致：9.987987987987989/29.508520002750945/0.9239643740684884，999张。启动HEAD8a26e86cffc8f5209c7924cf0d425044eaa0bdd4；保留历史dirty启动与实际评估代码的溯源边界。原run_r08.sh只执行best-val，不包含test，当前确无R08 test，不能把训练日志test_mae（test_split=val）误报为测试集。
+
+P02于2026-10-19T06:07:41+08:00整条pipeline正常退出0，30条epoch0–29日志，best checkpoint epoch13（第14轮）与完成标志和best-val/test文件一致：val999张=10.894894894894895/31.2739837894385/0.914593940870526，test2000张=19.208/51.636527768625186/0.5922887239363432。代码d521714b4515d07688a8686b34a03514842be56c，指纹de263a0557b393fe8f02497798f3fc4331d95cc0bc66574346a21a5a8337f224。本次R08 val、P02 val/test及配对R01 val/P01 val/test逐图路径均唯一且等于官方split扣除既定三图，每张GT等于原points数量，三指标独立重算一致。
+
+P03宿主机PID1514919、后台PID1510920仍存活，GPU3实测22964MiB/100%（瞬时）；GPU0/2各1MiB/0%，两项完成释放。P03完成14轮、正在15轮，日志batch660/1749，阶段性best epoch4（第5轮）val10.485485485485485/28.17653131449854/0.9306738112230415，与best checkpoint核对；未完成预算，无test。进度为带时间快照，非固定状态。
+
+当前结论与下一步已更新第1/8节：R08无全面val收益、test缺失；P02 mask修复无全面收益、不能解释全部早期差距；P03待完成初始化控制。保持P03、R06/R09门槛及原协议，不依据test挑epoch或调参。本次仅只读核验、写结果记录和同步两份docs，未启动新训练/评估，未改模型、数据、配置或推理。证据：[results_verified_20261019.json](../runs/tpc268_v3_exclude3/planning/results_verified_20261019.json)。早期PROPOSED/READY/RUNNING段落按其当时日期理解。
+
+
+## 2026-10-19 R08 第12轮best测试集评估准备（2026-10-19T11:13:20+08:00）
+
+用户明确授权完成R08最终best的test。准备runs/tpc268_v3_exclude3/run_r08_test_final.sh，固定空闲GPU0、至少4096MiB空闲，输出entailment_seed42/test_final/，不覆盖val或其他run。核对训练DONE/exit0、checkpoint epoch11（第12轮）/best val MAE9.987987987987989、full_taxonomy、Lorentz TT/TV-only系数.05/.05、seed42/30轮/train batch4，记录checkpoint前后SHA、实际代码HEAD/diff和环境；锁防重复。shell和内嵌Python语法已通过。
+
+沿用原R08主caption/registry/三图代码排除/原初始化来源/冻结/模型/整图推理协议，测试2000张无排除、3exemplars、短边800/max1333、box/text阈值.23/0，无crop/SAM/exemplar correction；eval实际batch1与R系列一致。沿用main锁定uv环境，不安装依赖；只把CPU线程/worker设为2控制资源。运行代码HEAD及真实参数记录在输出目录；历史dirty训练源码边界保持。结束核对完整官方集合、每图GT点数、三指标独立重算、test与best-val training_protocol完全相同及权重SHA不变。测试性能、PID及实际启动状态尚未知；不根据test重选epoch或改阈值。无需更改P03/其他训练，模型和数据协议本次实质不变。
+
+后台命令：`nohup setsid bash runs/tpc268_v3_exclude3/run_r08_test_final.sh > runs/tpc268_v3_exclude3/entailment_seed42/test_final.console.log 2>&1 < /dev/null &`；监控对应test_final.console.log。启动后核实状态，完成后同步本文件与另一份docs的正式结果。
+
+
+2026-10-19 R08 test已启动：RUNNING 2026-10-19T11:13:24+08:00，后台PID2214660，GPU0；输出entailment_seed42/test_final/。实际评估HEAD已保存git_commit.txt，指标仍未知，等待进度与完成校验。训练DONE状态保持，test状态单独记录，不把启动当完成。
+
+
+## 2026-10-19 R08 第12轮最终best测试完成（11:21:15 +08:00）
+
+用户授权的评估已完成，GPU0，后台PID2214660；RUNNING 11:13:24→DONE 11:21:15，exitcode=0。输出runs/tpc268_v3_exclude3/entailment_seed42/test_final/；checkpoint_best_regular.pth元数据epoch11（第12轮）/best-val MAE9.987987987987989，前后SHA256一致：edd82a3f2ffb5a9d1d672e5efcadb772ac240f4fe09428937ce60292220fda40。原权重没有改写，严格加载missing/unexpected均空。
+
+最终test：2000张，MAE13.689、RMSE37.20697515251676、R²0.7883163139084353。官方test路径集合逐项一致且唯一，每图GT等于原points长度，三指标独立重算吻合；与该run best-val的training_protocol及taxonomy_fingerprint一致。整图、3exemplars、实际eval batch1、阈值.23/0、无crop/SAM/exemplar correction；固定seed42，CPU线程/worker2只控制资源，数据/配置/训练/模型协议未改。PyTorch日志峰值allocated1584MiB。
+
+实际eval HEAD6341592d13575f3626bc70f08604b96ab231f4ef，保存的运行源码diff为空；训练原启动HEAD8a26e86cffc8f5209c7924cf0d425044eaa0bdd4及dirty来源边界照旧保留，不能仅凭HEAD声称历史源码逐字节一致。实测Python3.10.12/torch2.13.0+cu130/torchvision0.28.0+cu130/transformers4.57.6及同main CUDA扩展，无依赖安装或环境同步，不与P系列旧版环境混用。
+
+compare_tpc268_runs对照R01通过caption逐字、每图GT、相同官方图像集合、冻结、seed、初始化来源、预算、训练/推理协议核对。R08−R01：test ΔMAE+1.0400（+8.2220%）、ΔRMSE+0.5637356669035896（+1.5384%）、ΔR²−0.006365989760866997。逐图787张改善、689张变差、524张相同，但总体三指标退化。结合val仅MAE微降且RMSE/R²退化，本seed当前TT/TV-only未显示整体计数收益；不据此推广为所有双曲几何无效，不改loss/阈值/epoch，不追加新训练。P03继续原预算，R06/R09门槛保持。
+
+证据：[test_metrics.json](../runs/tpc268_v3_exclude3/entailment_seed42/test_final/test_metrics.json)、[verified.json](../runs/tpc268_v3_exclude3/entailment_seed42/test_final/verified.json)、[R01_R08_comparison.json](../runs/tpc268_v3_exclude3/entailment_seed42/test_final/R01_R08_comparison.json)。早先11:03的test缺失记录和11:13的启动记录均为历史快照，当前正式结果以本节和主表为准。两份docs已同步，未修改官方数据及标注。
+
+
+## 2026-10-19 下一项新训练建议：P04 organ-only配对基线（PROPOSED；2026-10-19T11:32:47+08:00）
+
+用户询问下一步做什么实验，本节仅记录建议，不代表已批准启动、已实现或已测得结果。刚读取P03日志：完整14/30轮、正在第15轮，最新已输出batch1560/1749；best仍第5轮（epoch4），val MAE10.485485485485485、RMSE28.17653131449854、R²0.9306738112230415，无完整30轮结果/test。此处依据日志，不补写未查询的实时PID/GPU状态；P03继续原设置完成，随后既有pipeline按val MAE选best并评估test。
+
+下一项新训练优先建议P04：以P03为严格配对基线，仅改变主caption策略，从官方精确名称七级逗号链/缺链species回退，改为目录所标器官`{organ}.`（例`fruit.`、`flower.`、`seed.`）。这定义为输入策略对照，同时移除species/taxonomy名称并提供organ词，不能进一步把差异单独归因分类层级长度或语义。organ-only仍含语义文本，不称纯视觉实验，不改CountGD结构/正标签路径或推理规则。
+
+其余全部沿用P03：FSC147 CountGD模型权重SHA c1bab864b17db345b4c6e3aaabb5765bc2c0a90d0bc8defb5e664a74a50aa126，严格model-only加载、fresh optimizer/scheduler/RNG、修复mask、无对比/TT/TV、Python3.9.19/torch2.2.1+cu121/transformers4.39.1锁定环境及同CUDA扩展、同冻结/AdamW/StepLR/原增强/中心监督、seed42、30轮、train/eval batch4、3原始exemplars（训练按增强后batch最少数）、同官方数据划分和三图代码排除、6998/999/2000、阈值.23/0及同整图计数。数据和标注不修改；不能顺带引入R系列环境、eval batch1、alias或额外后处理。P04独立从原FSC147初始化，不从P03/TPC微调或短程checkpoint续训。
+
+动机：R07 test三指标退化，R08 test MAE较R01增加8.2220%，R02/R04未获配对val收益；P02 mask修复未带来全面改善。现在缺的是统一协议下可靠的输入基线，非更多辅助loss组合。R05现有test MAE10.5470为已完成基线中最低，但其val并非最优，且与P03环境/caption解析/eval batch不同，因此只能提示检验organ-only，不能充当P04的严格baseline或证明organ优越。P04−P03仅解释本固定P协议/seed下prompt策略效应；不能用P04−R05归因单一因素。
+
+执行前需实现新prompt协议/独立输出与运行指纹，核对除caption相关字段外P03配对项完全一致，并通过真实短程训练+完整val检查。正式30轮预算及按val MAE选best规则预先固定，不改阈值，不据test挑epoch；报告同best的RMSE/R²和完整曲线，之后一次完整test。P04是在已看过R05等test后提出的探索性对照，不能包装为未见test的确认性研究；若后续要主张稳定优越，需预先固定比较并增加配对seed，不只给有利模型补seed。
+
+R06 organ完整方法、R09 full目标欧氏对照暂不优先；当前没有全面辅助收益，不因GPU空闲展开系数扫描。若后续研究问题是隔离几何，仍需与具体TT/TV或full目标完全匹配的欧氏对照，旧R09不能替代TT/TV-only对照。本次不新增可执行配置/脚本、不启动训练，P04提交/运行ID/GPU/指标均未知；后续用户要求执行时再准备完整可核验实现。P03和已运行实验不变。
+
+
+## 2026-10-19 P04 organ-only配对实验准备（PREPARING；2026-10-19T11:39:48+08:00）
+
+用户已明确授权在空闲GPU后台启动P04。运行ID=tpc268_p04_organ_20261019，独立分支repro/tpc268-p04-organ，从P03固定提交2e964cdb9ef1ec6c02f3c4438bf1863ba3eea49b创建。GPU2刚核实24124MiB空闲/0%利用率，0/1/3均有占用；固定GPU2，不改P03。P04实际提交/进程/PID/正式指标仍待启动核实。
+
+唯一实验因素为主caption：P03官方七级文本/缺链species回退→P04目录器官`{organ}.`（`fruit.`、`flower.`、`seed.`等），所有split每张图都用organ，不因taxonomy缺失回退species。实际train含flower/fruit/leaf/plant/resin/root/seed/stem/stoma共9种，val/test含其中6种；不删除罕见器官或训练样本。organ-only含语义文本，不称纯视觉；同时更改输入信息和提示格式，不能单独归因层级长度。
+
+其余与P03严格一致：FSC147 CountGD checkpoint_fsc147_best.pth的SHA256=c1bab864b17db345b4c6e3aaabb5765bc2c0a90d0bc8defb5e664a74a50aa126；严格加载全部model参数及持久buffer，不加载预训练optimizer/scheduler/RNG；独立seed42，修复mask，无对比/TT/TV，无辅助分支。原CountGD配置、冻结backbone.0/bert、AdamW lr1e-4/wd1e-4/StepLR10/clip0.1、原resize/crop/flip、2px中心监督、30轮、FP32、train/eval batch4、worker4、eval3exemplars/训练按增强后batch最少数、6998/999/2000及三图代码排除、800/1333整图/阈值.23/0/无crop/SAM/NMS/数量校正均保持。数据、标注和官方split不改。
+
+共享P01只读锁定.venv：Python3.9.19/torch2.2.1+cu121/torchvision0.17.1+cu121/transformers4.39.1及既有CUDA扩展；uv显式指定该解释器、不安装/sync。保留P01 .venv及environment.json、P03 audit/protocol.json和工作树dataset源文件（真实数据配对检查依赖），不引入main新环境或eval batch1。
+
+实现边界：53份模型/core源码、transforms和依赖锁要求逐hash等于P03；config仅prompt_protocol不同；Dataset仅self.phrases换organ及审计metadata字段改名；taxonomy完整标志仍作为元数据供分组，绝不进入caption。原full_taxonomy_images/species_fallback_images/fallback_species报告改为official_*_metadata名称，避免误报P04使用分类文本/回退species。主训练main、evaluate、loader和mask-check函数逐源核对P03完全相同；初始化/模型/损失/优化和推理无改动。入口比较P03指纹c9a750ff0e49ba0be91c130eebd31f79fa03a3aaf90da26768e65bac63d159fe，只允许caption相关变化；审计还会比较全split路径/GT及每个器官代表样本同随机种子下的图像增强、points/boxes/exemplars/labels等全部非文本target和RNG消耗，未执行前不写通过。
+
+脚本run_p04.sh：GPU2至少22000MiB空闲、flock防重复、nohup+setsid防SSH断连。流程audit→15批GPU预检+999val和保存→重新从原FSC147独立初始化正式30轮→按val MAE选best重评→一次2000test。预检不算正式结果，不从P03或预检checkpoint续训。语法检查已通过，实际audit/GPU预检待运行。
+
+后台启动：
+```bash
+cd /home/new_space_1/new_space_1_for_lijiahui/research/CountGD
+nohup setsid bash runs/tpc268_p04_organ_20261019/worktree/run_p04.sh > runs/tpc268_p04_organ_20261019/pipeline.console.log 2>&1 < /dev/null &
+```
+阶段日志pipeline.console.log，预检preflight.console.log，正式train.console.log，均在同一run根目录。当前正式训练尚未启动，正式val/test/best未知。
+
+P04−P03检验统一P协议下的prompt策略；R05只提供探索动机，不能直接当作P04匹配baseline。本方向在已查看R05等test后提出，属于探索性实验；不因test调阈值/挑epoch，若主张稳定优越再预先固定配对多seed。R06/R09门槛保持，不启动其它新实验；两份docs同步更新。
+
+
+### 2026-10-19 P04后台启动与配对审计通过（2026-10-19T11:41:31+08:00）
+
+P04源码固定fc6ad2e66602b234111f965d3bcac618e68fa408，启动worktree.diff为空。nohup+setsid后台PID2247612、PPID1、SID2247612、无TTY已在宿主机核实；GPU2。AUDIT开始11:40:20，PREFLIGHT开始11:40:47；正式训练尚未开始，GPU预检结果待完成。
+
+审计指纹51c7e4a04e3d5c266b1d77265fcdef7f98366ebd63acd9e1ecfdc4aa75c465a2，对照P03指纹c9a750ff0e49ba0be91c130eebd31f79fa03a3aaf90da26768e65bac63d159fe。全部53份核心源文件、非caption配置/资产/初始化/67项环境依赖及native扩展SHA逐项匹配。main/evaluate/loader/mask-check逐源相同，dataset/config严格限制为caption及报告字段改动。train/val/test=6998/999/2000每图organ提示均检查，21个代表样本（9/6/6器官）同seed下图像张量、全部非文本target及RNG消耗与P03相同。数据/标注原样，完整taxonomy标志只保留为metadata；不存在P04 species回退。证据audit/protocol.json、matched_data_check.json、dataset_audit.json、captions.json；caption含3exemplars最大8tokens，未截断。
+
+正式30轮best/val/test均未知，15批预检通过后脚本会独立重新初始化开始正式训练；当前不要重复启动。
+
+
+### 2026-10-19 P04 正式训练已启动并核实（2026-10-19T11:45:29+08:00）
+
+状态TRAINING，正式开始2026-10-19T11:44:28+08:00；当前第1/30轮（epoch0，已输出batch20/1749），完整train+val为0轮，正式best/val/test仍未知。后台PID2247612、训练PID2254352、PPID1/SID2247612/无TTY已在宿主机核实；GPU2，瞬时占用7902MiB。nohup+setsid保持SSH断开后运行，锁防重复，不要再次执行启动命令。
+
+15批真实训练+完整999val与checkpoint保存已通过，1146项模型参数/持久buffer严格加载无缺失/额外/shape差异；正确mask、exemplar插入及梯度、无padding原版等价检查通过。audit/preflight/train的协议指纹均为51c7e4a04e3d5c266b1d77265fcdef7f98366ebd63acd9e1ecfdc4aa75c465a2，代码fc6ad2e66602b234111f965d3bcac618e68fa408，启动源码diff为空；启动后只追加文档状态，运行代码不改。
+
+预检技术结果val MAE10.65065065065065、RMSE28.446567582174254、R²0.9293386368130596，不是正式最佳性能，不进入正式性能表。正式进程已重新加载原FSC147权重并重新创建seed42/optimizer/scheduler；首批loss12.4044与预检首批一致，绝非从预检15批或P03权重续训。实际首批训练loss有限，未出现报错。
+
+后续自动完成30轮→按val MAE选best→best-val重评→一次完整2000图test，保持P03及其他实验不变。记录runs/tpc268_p04_organ_20261019/launch_verified.json；正式进度命令`tail -F runs/tpc268_p04_organ_20261019/train.console.log`，阶段命令`tail -F runs/tpc268_p04_organ_20261019/pipeline.console.log`。两份主docs和本工作树两份docs同步；早先PROPOSED/PREPARING/PREFLIGHT按当时时点理解。
+
+
+## 2026-10-19 P03/P04训练进度核查（15:51 Asia/Shanghai）
+
+只读读取正式训练日志、best_val_metrics.json、实际运行protocol并查询宿主机进程/GPU。P03后台PID1510920/训练PID1514919仍运行于GPU3，已完成19/30个完整train+val，正在第20轮（日志epoch19，最近batch10/1749）；best仍第5轮（epoch4），val999张MAE10.485485485485485、RMSE28.17653131449854、R²0.9306738112230415。P04后台PID2247612/训练PID2254352仍运行于GPU2，已完成4/30，正在第5轮（epoch4，最近batch560/1749）；best第2轮（epoch1），val999张MAE10.793793793793794、RMSE32.30663583102888、R²0.9088606888426949。两份best指标均与各自正式逐轮日志最小MAE的同一轮一致。两组均尚无最终test/30轮完成标志，阶段性结果不当作完整预算比较；轮次采用1-based。
+
+P03代码2e964cdb9ef1ec6c02f3c4438bf1863ba3eea49b，主caption为官方精确名称七级逗号链+句点，缺链只用Species.，无手工异名、无organ前缀；P04代码fc6ad2e66602b234111f965d3bcac618e68fa408，仅主caption换为目录器官{organ}.，例fruit.，不含species或taxonomy文本。两者共享FSC147 CountGD model-only独立初始化、修复mask、无对比/TT/TV辅助损失，seed42/30轮/FP32/train和eval batch4、冻结backbone.0/bert、AdamW lr1e-4/wd1e-4/StepLR10/clip0.1、同原增强/中心监督、三图代码排除6998/999/2000、旧版锁定环境和整图阈值.23/0推理。P03对P02控制初始化，P04对P03控制prompt策略。
+
+GPU瞬时占用P03=22964MiB/100%，P04=21926MiB/100%；状态来自15:51宿主机核查，不用历史启动状态冒充实时状态。只更新进度和两份docs，不改模型/数据/环境/配置、不重启训练。两组按原预算继续，结束由既有pipeline对val MAE选择的best重评val并跑完整test。
+
+
+## 2026-10-20 P03最终最佳权重测试核验（2026-10-20T10:10:16+08:00）
+
+用户要求在GPU3测试P03。核查发现原run_p03.sh固定CUDA_VISIBLE_DEVICES=3，已自动完成TRAINING→BEST_VAL→TEST：训练完成30轮，BEST_VAL 03:08:02、TEST 03:11:20、DONE 03:17:34，整条pipeline exit_code=0。故本次直接核验已完成的同卡同权重测试，不另启动重复推理；GPU3当前24124MiB空闲/0%，原后台PID1510920/训练PID1514919已退出。
+
+best checkpoint epoch4（第5轮）、best_val_mae10.485485485485485、training_mode=train、指纹c9a750ff0e49ba0be91c130eebd31f79fa03a3aaf90da26768e65bac63d159fe，均与30条完整训练日志最低val、train/completed.json、best-val及test结果对应。当前权重SHA256=d973c7ba576149f39e467c651115aa5ff2e09cc309e32e86cd6cfdcc4f0ef944；原pipeline未另存运行前后SHA，本次仅记录当前权重哈希，不补称已做历史前后比对。代码commit2e964cdb9ef1ec6c02f3c4438bf1863ba3eea49b，audit/train/best_val/test指纹及commit一致，沿用原Python3.9.19/torch2.2.1+cu121/transformers4.39.1环境和编译扩展。
+
+最终val999张：MAE10.485485485485485、RMSE28.17653131449854、R²0.9306738112230415；test2000张：MAE11.338、RMSE35.49826756336145、R²0.807312750302844。两份计数输出路径唯一且等于官方split（val按既定排除1图，test无排除），每图GT等于原points数量，整数预测/GT与三指标独立重算吻合，未修改任何数据/预测。test使用原seed42、3exemplars、eval batch4、整图800/1333、阈值.23/0，无crop/SAM/NMS/数量校正；无推理协议变动。
+
+P03/P02协议核对：53份core、资产/配置（除初始化路径）、环境/修复mask/增强/推理及Dataset/config/锁文件hash均一致，audit/captions.json逐项相同，只比较既定初始化来源差异。P03相对P02：val ΔMAE−0.4094094094094096、ΔRMSE−3.09745247493996、ΔR²+0.016079870352515457；test ΔMAE−7.87（−40.9725%）、ΔRMSE−16.138260205263734（−31.2536%）、ΔR²+0.21502402636650075。该受控seed支持初始化来源有明显影响，不推广到所有设置，不将P03−P01两因素差异冒充单一因素，P04继续原定prompt对照。
+
+证据：[test_metrics.json](../runs/tpc268_p03_fsc147_init_20261018/test/test_metrics.json)、[verified.json](../runs/tpc268_p03_fsc147_init_20261018/test/verified.json)、checkpoint_metadata_verified.json及原pipeline/test console。两份主docs及P03工作树docs已同步更新；实现、模型、环境、数据、超参数均未更改。早期P03 RUNNING/无test记录按当时时点理解。
+
+
+## 2026-10-20 R06：按用户指定准备20轮启动命令（未启动）
+
+用户明确要求做原计划R06，但训练预算改为20轮，随后明确“给我启动命令，不需要帮我启动”。因此覆盖此前R06自动调度门槛，仅准备脚本，状态READY，不启动GPU训练或短程预检。新run ID=`organ_method_seed42_e20`，提交沿用当前HEAD `6341592d13575f3626bc70f08604b96ab231f4ef`（文档有未提交修改、runs脚本为本地产物）；实际启动提交/进程/指标尚无。GPU3准备时查询空闲24124MiB，脚本启动时重新检查至少20000MiB，显式固定`CUDA_VISIBLE_DEVICES=3`。
+
+R06用原`config/cfg_tpc268_organ_full.py`，主caption=`{organ} .`，例如`fruit .`；训练时开启分层对比+Lorentz TT/TV，系数0.1/0.05/0.05，首轮warmup。FSC147 CountGD原权重独立初始化，不载入R05/P03/P04的TPC权重或短程checkpoint。seed42、train batch4/eval实际batch1、冻结backbone.0/bert、原增强、三图代码排除、registry/坐标协议、原阈值.23/0和StepLR每10轮衰减均沿用R系列。正式训练20轮，每轮完整val，只按val MAE选best，结束后独立重评999图val；不自动test。使用主仓库既有Python3.10.12/torch2.13.0+cu130/torchvision0.28.0+cu130/transformers4.57.6，uv显式指定`.venv/bin/python`并离线/no-project，不同步或安装环境。
+
+**预算对齐**：有效配置与R05逐项比较，只有epochs30→20、两项辅助开关False→True。R05训练日志虽将val字段命名`test_*`，已检查`test_split=val`；30条完整日志中，前20轮val MAE最优仍是第12轮，等于全30轮最优：MAE10.476476476476476、RMSE30.35284657647937、R²0.9195509124443442。因学习率使用StepLR而非依赖总epochs的日程，可用R05原训练前20轮作为等预算参照，无需重复训练R05；不能把R06的20轮结果标为与30轮完整搜索预算相同。R05历史训练工作区dirty、完整源码不可变归档不足的既有边界仍保留。P04属于不同环境/输入协议，不是R06的匹配基线。
+
+启动脚本：[run_r06_e20.sh](../runs/tpc268_v3_exclude3/run_r06_e20.sh)。包含flock、防已有训练产物隐式resume/覆盖、退出码/status/stage、启动时配置/环境检查及源码/数据协议/初始化hash清单。既有10月13日organ_full技术检查通过属于历史证据，不冒充本次已跑GPU预检；本次只执行bash语法、内嵌Python语法、有效配置与R05前20轮日志核对，准备记录：[r06_e20_prepared_20261020.json](../runs/tpc268_v3_exclude3/planning/r06_e20_prepared_20261020.json)。模型、loss实现、原配置及数据集未改，两份docs同步更新。
+
+```bash
+cd /home/new_space_1/new_space_1_for_lijiahui/research/CountGD
+nohup setsid bash runs/tpc268_v3_exclude3/run_r06_e20.sh \
+  > runs/tpc268_v3_exclude3/launch_organ_method_seed42_e20.log 2>&1 < /dev/null &
+```
+
+查看进度（启动日志也包含训练与最终best-val输出）：
+
+```bash
+tail -f runs/tpc268_v3_exclude3/launch_organ_method_seed42_e20.log
+```
+
+
+## 2026-10-20 R08-LC：可学习曲率、20轮，只准备启动命令
+
+用户明确要求R08可学习曲率版本训练20轮，并给出命令；本次没有启动真实训练、短程数据预检或GPU评估。ID=`R08-LC`，run=`entailment_learnable_seed42_e20`，状态READY。当前HEAD仍为`6341592d13575f3626bc70f08604b96ab231f4ef`，新配置/文档尚未提交，实际训练commit/PID/指标未知，启动时另存HEAD、diff和源文件hash。运行配置：[cfg_tpc268_entailment_learnable.py](../config/cfg_tpc268_entailment_learnable.py)，脚本：[run_r08_learnable_e20.sh](../runs/tpc268_v3_exclude3/run_r08_learnable_e20.sh)。
+
+配置继承原R08，仅`learn_curvature=False→True`及`epochs=30→20`。保持`curvature_init=1`，空间曲率为−c，TT/TV共享一个全局log_c参数，有效c范围[0.1,10]；原有alpha_t/alpha_v继续学习，曲率无额外正则/独立学习率变更，沿用原AdamW lr1e-4、weight decay1e-4、StepLR10。只有TT/TV辅助损失（系数.05/.05、含既有bridge与TT负父项），对比损失关闭。主caption仍是R系列full_taxonomy：`{organ} of {species}; taxonomy: {Kingdom}, ..., {Species} .`，缺链按既有species回退。相同FSC147 CountGD权重独立model初始化、seed42、train batch4/eval实际batch1、冻结backbone.0/bert、原增强及三图代码排除，6998/999/2000、registry/坐标/整图阈值.23/0全部保持。禁止用R08已训练或短程权重续训新实验。
+
+使用主仓库原Python3.10.12/torch2.13.0+cu130/torchvision0.28.0+cu130/transformers4.57.6；uv离线no-project、显式主`.venv/bin/python`，不更新环境。训练20轮，每轮全量val，按val MAE选择best，完成后重评999张val，不自动test。日志已有`train_tax_curvature_unscaled`，配合TT/TV损失、锥非法率/饱和率及alpha尺度诊断；曲率变化或辅助loss下降不代表计数改善。既有val_metrics.training_protocol没有curvature_init/learn_curvature字段，本次不修改训练核心代码，两个字段完整保存在新配置、config_args_all/checkpoint args及launch_manifest.curvature_protocol，不把旧协议摘要误当完整曲率配置。
+
+**等预算参照**：原R08的30条日志均为val（原字段前缀test），前20轮最低val MAE仍是第12轮，等于全30轮best：9.987987987987989/29.508520002750945/0.9239643740684884。StepLR不依赖总预算，后续R08-LC与R08前20轮val选择范围配对，不冒称与30轮搜索预算相同。R08历史源码dirty/不可完整重建边界保留；本次属于已查看历史test后的探索性实验，不依据新test改阈值、lambda或挑epoch。
+
+技术检查：bash -n、内嵌Python AST、相对R08有效配置只差上述两项、R08前20轮选择均通过。真实代码的CPU合成几何反向检查确认log_c为Parameter且唯一进入优化器，梯度0.25372225046157837有限且非零，一次AdamW step使c从1更新为0.9998999834060669，锥非法数0。这只是合成数据CPU技术检查，不是CountGD训练或性能。准备证据：[r08_learnable_e20_prepared_20261020.json](../runs/tpc268_v3_exclude3/planning/r08_learnable_e20_prepared_20261020.json)。没有修改损失/模型/训练主程序或其他在训实验，数据及标注未变。
+
+默认计划GPU1（`R08_GPU`可改为另一单卡索引）；实时GPU查询的自动审批超时，当前GPU1空闲状态未知。脚本会在实际启动时重新检查指定卡至少20000MiB空闲，不自动抢占/转移到GPU0；独立flock、防已有训练产物隐式resume，保存日志/status/stage/exitcode及协议来源。启动命令不由本次助手执行：
+
+```bash
+cd /home/new_space_1/new_space_1_for_lijiahui/research/CountGD
+R08_GPU=1 nohup setsid bash runs/tpc268_v3_exclude3/run_r08_learnable_e20.sh \
+  > runs/tpc268_v3_exclude3/launch_entailment_learnable_seed42_e20.log 2>&1 < /dev/null &
+```
+
+查看进度：
+
+```bash
+tail -f runs/tpc268_v3_exclude3/launch_entailment_learnable_seed42_e20.log
+```
+
+
+同期只读补记：R06的`organ_method_seed42_e20/status`实际记录`RUNNING 2026-10-20T10:20:16+08:00`、stage=`TRAINING`，配置文件已生成，故主状态表由早先READY更新为状态文件已启动，未核查GPU/PID或轮次，不把文件状态当作当前活进程证明。本助手本次未执行R06或R08-LC启动命令。
+
+
+## 2026-10-20 R08-GD：GroundingDINO初始化来源对照（准备）
+
+用户要求在R08基础上使用GroundingDINO初始化并使用GPU2。本次沿用原版R08固定曲率c=1、30轮预算，不继承另一个R08-LC的可学习曲率或20轮设置。ID=R08-GD，run=`entailment_groundingdino_seed42`，复用`config/cfg_tpc268_entailment.py`。准备时HEAD=`6341592d13575f3626bc70f08604b96ab231f4ef`，新入口及文档未提交，启动另存HEAD/diff/hash。宿主机已核实GPU2空闲24124MiB/0%，入口重新检查至少20000MiB。不改其他训练。
+
+唯一实验因素为初始化来源：FSC147 CountGD改为`checkpoints/groundingdino_swinb_cogcoor.pth`，SHA256=`46270f7a822e6906b655b729c90613e48929d0f2bb8b9b76fd10a856f3ac6ab7`。共享1106项张量严格匹配并加载；GroundingDINO缺少的40项CountGD参数（feature_map_proj及feature_map_encoder）保留原构造初始化，taxonomy辅助分支12项参数/持久buffer同样保留原初始化。固定BERT position_ids必须为arange，label_enc为当前dn_number=0模型不使用的源参数，明确丢弃这两项；任何其他缺失/额外项或shape差异报错。初始化因素包含CountGD专有模块是否经过预训练，不解释为仅更换视觉backbone。独立seed42、fresh optimizer/scheduler/RNG，不加载FSC147/TPC权重或CPU检查模型。
+
+其余与R08相同：主caption为R系列`{organ} of {species}; taxonomy: {Kingdom}, ..., {Species} .`，缺链原species回退/registry/alias策略，非P系列官方模板；修复mask，3个visual exemplars，TT/TV系数.05/.05、contrast关闭、固定Lorentz曲率−1、原冻结/增强/2px中心监督，FP32、train batch4/eval实际batch1、AdamW lr1e-4 wd1e-4 StepLR10，三图代码排除及6998/999/2000划分，整图800/1333、阈值.23/0，无额外推理后处理。主环境Python3.10.12/torch2.13.0+cu130/torchvision0.28.0+cu130/transformers4.57.6；uv离线/no-project显式`.venv/bin/python`，不安装或同步环境。数据及标注不改。
+
+专用入口`tools/train_tpc268_groundingdino.py`只在该进程fresh初始化阶段设置严格GroundingDINO加载边界，正常评估使用原main.py；共享main/model/loss/loader不变。启动脚本`runs/tpc268_v3_exclude3/run_r08_groundingdino.sh`固定CUDA_VISIBLE_DEVICES=2，flock、防已有产物隐式resume/覆盖、GPU空闲检查、status/stage/exitcode及初始化报告/源码/数据协议/环境hash。流程为30轮训练、每轮完整val按MAE选best、结束独立重评999图val；不自动test。
+
+已通过bash语法、入口及内嵌Python AST、有效配置与原R08逐项完全一致检查；实际CPU构建CountGD并严格加载权重通过，报告`runs/tpc268_v3_exclude3/planning/r08_gd_initialization_cpu_20261020.json`，不冒充真实训练/性能。原R08配对参照为30轮、第12轮best-val 9.987987987987989/29.508520002750945/0.9239643740684884；历史dirty源码缺少完整不可变归档的边界仍保留。此次仅检验本R08协议/seed下初始化来源，不跨P系列归因；已看历史test后提出，属于探索性实验，不用test选epoch/调参。
+
+后台启动命令（本次用户已授权执行）：
+```bash
+cd /home/new_space_1/new_space_1_for_lijiahui/research/CountGD
+nohup setsid bash runs/tpc268_v3_exclude3/run_r08_groundingdino.sh > runs/tpc268_v3_exclude3/launch_entailment_groundingdino_seed42.log 2>&1 < /dev/null &
+```
+进度：`tail -f runs/tpc268_v3_exclude3/launch_entailment_groundingdino_seed42.log`。此段为准备记录，实际启动/首批检查另记；正式best/val/test尚未知。两份docs同步更新。
+
+
+### 2026-10-20 R08-GD后台启动核实（19:35 Asia/Shanghai）
+
+实际后台启动于19:34:39，TRAINING阶段19:34:48；19:35:43核实launcher PID253082、训练PID253270，PPID1/SID253082/无TTY，GPU2 UUID=GPU-3163c4c0-3619-4198-ffcd-664c831f1cb9实际分配训练进程10750MiB，nohup+setsid防SSH断连。当前第1/30轮（epoch0），已输出batch10/1749，完成完整train+val为0轮；正式best/val/test尚无，不重复启动。
+
+launch_manifest确认有效配置相对原R08零差异，GroundingDINO源SHA与预定值一致；实际GPU加载1106项共享张量及40+12项明确随机初始化状态通过。首批loss1700.2583，batch10最新loss880.6318，均有限；日志包含TT/TV、不含contrast、c=1、锥非法率0。这只说明启动/初期优化正常，不是模型性能或最终收敛结论。模型代码及环境未变，后续按30轮/val MAE选best规则继续，结束重评val，不自动test。
+
+启动代码HEAD6341592d13575f3626bc70f08604b96ab231f4ef，专用新入口未提交，故不把HEAD单独当完整源码身份；launch_manifest含入口及核心源码hash，launch_sources另存入口/启动脚本快照，launch_verified记录hash、进程与初期日志检查。证据`runs/tpc268_v3_exclude3/entailment_groundingdino_seed42/{launch_manifest,initialization_report,launch_verified}.json`；进度`tail -f runs/tpc268_v3_exclude3/launch_entailment_groundingdino_seed42.log`。两份docs同步记录。此前READY段按准备时点理解，R08-LC/R06/P04状态未在本任务重新审计。
+
+
+## 2026-10-21 R06 / R08-LC完整测试集评估（准备）
+
+用户明确要求评估两组测试集。已核实各自20条完整train+val日志、训练及best-val pipeline DONE/exitcode0：R06完成于11:11:21，第5轮best-val=10.64064064064064/26.04504452567406/0.9407658067617174；R08-LC完成于11:12:52，第1轮best-val=10.23023023023023/28.625118294906617/0.9284488119034939。此前READY/RUNNING按历史时点理解，测试前均无test结果。
+
+只使用上述val MAE选择的checkpoint_best_regular.pth，不用最后一轮、不重训或依据test挑epoch。GPU3运行R06、GPU1运行R08-LC，启动前宿主机两卡各24124MiB空闲。新增本地脚本runs/tpc268_v3_exclude3/run_r06_r08lc_test.sh，输出各自test_final/；nohup+setsid、flock及防覆盖检查，独立eval状态/退出码，不改训练状态。先核对best epoch/训练参数、环境、全部训练启动manifest的源码/配置/数据协议hash，记录best权重SHA和曲率；评估后再比SHA。若检查未通过则退出，不放宽协议。
+
+完全沿用各自最佳权重重评val协议：主仓库既有.venv、uv离线no-project不安装/同步，seed42、FP32、train配置batch4（eval实际batch1）、workers4、3exemplars、整图800/1333、阈值.23/0、无crop/SAM/数量校正；同registry/数据排除/坐标策略。R06为organ提示、contrast+固定曲率TT/TV；R08-LC为full_taxonomy提示、仅TT/TV、learn_curvature=True且加载第1轮best保存的log_c（不使用最后一轮曲率）。测试集官方2000张全评，不额外排除任何test图。
+
+脚本将验证2000条路径唯一且等于官方split、GT等于原annotation点数、从整数计数独立重算MAE/RMSE/R²，并核对推理及training_protocol与best-val一致。既有指标摘要遗漏learn_curvature/curvature_init，因此额外在checkpoint_metadata.json记录这两个字段及best实际c，不改共享核心代码。数据、标注、模型/loss/配置及在训R08-GD均不修改；两份docs同步更新。此节为准备记录，PID/实测test/成功状态待运行后记录。
+
+```bash
+nohup setsid bash runs/tpc268_v3_exclude3/run_r06_r08lc_test.sh R06 > runs/tpc268_v3_exclude3/launch_r06_test_final.log 2>&1 < /dev/null &
+nohup setsid bash runs/tpc268_v3_exclude3/run_r06_r08lc_test.sh R08-LC > runs/tpc268_v3_exclude3/launch_r08lc_test_final.log 2>&1 < /dev/null &
+```
+
+
+### 2026-10-21 R06 / R08-LC最佳权重test已启动（11:48 Asia/Shanghai）
+
+两组预检均通过：checkpoint epoch分别4/0（第5/1轮），与20轮完整日志最低val MAE及best-val重评一致；全部训练启动清单中的78/79份源码/配置/资产hash与当前逐一相同。R06 best SHA256=4e4a790c5e4343be454395f4274531bf936ba69f63abd22c35e73674fc406166，固定c=1；R08-LC best SHA256=e8a760e9b0ce114e109270da08591ce4b6568f2723592819bddc724d152a1cb0，可学习c=0.8409649729728699（第1轮best，非最后一轮）。具体源码hash、环境/native扩展hash、训练参数及曲率字段保存于各自test_final/checkpoint_metadata.json。
+
+11:48:08后台启动，评估进入RUNNING于11:48:35，launcher PID分别1038552（R06/GPU3）、1038553（R08-LC/GPU1）。首批真实test推理均通过，日志已输出10/2000；尚无最终性能，不提前填写。两份docs同步更新，主表训练状态和已确认best-val改为20轮完成、test运行中；没有更改模型/配置/数据/环境或推理协议。
+
+
+## 2026-10-21 R06 / R08-LC完整测试完成并核验（11:55 Asia/Shanghai）
+
+R06：训练commit=6341592d13575f3626bc70f08604b96ab231f4ef，测试commit=6341592d13575f3626bc70f08604b96ab231f4ef；best第5轮，GPU3；val MAE/RMSE/R²=10.64064064064064/26.04504452567406/0.9407658067617174；test2000图=10.734/30.724338886296643/0.8556543321384513；权重SHA256=4e4a790c5e4343be454395f4274531bf936ba69f63abd22c35e73674fc406166，best c=1.0；DONE 2026-10-21T11:55:28+08:00、exitcode0。
+
+R08-LC：训练commit=6341592d13575f3626bc70f08604b96ab231f4ef，测试commit=6341592d13575f3626bc70f08604b96ab231f4ef；best第1轮，GPU1；val MAE/RMSE/R²=10.23023023023023/28.625118294906617/0.9284488119034939；test2000图=11.14/32.864798797497606/0.8348416191688222；权重SHA256=e8a760e9b0ce114e109270da08591ce4b6568f2723592819bddc724d152a1cb0，best c=0.8409649729728699；DONE 2026-10-21T11:55:52+08:00、exitcode0。
+
+两组均为20轮完整训练范围内按val MAE选出的同一best，不从test挑epoch。每组2000条唯一relative_path精确等于官方test，GT逐图等于原annotation的points数量，从整数预测独立重算三指标吻合（R²仅浮点末位差）；阈值/整图推理/3exemplars及training_protocol、taxonomy指纹与其best-val重评相同。权重评估前后SHA一致，源码/配置/数据协议78/79份训练manifest hash逐项相同。R08-LC实际使用第1轮best保存的c=0.8409649729728699，绝非第20轮或曾报告的训练中c≈0.645；评估跳过训练辅助分支，但完整checkpoint状态按相同配置载入。
+
+比较参照：R05/R08原30轮日志的前20轮val最优均仍第12轮，等于全30轮best，StepLR10不依赖总epochs，故已有同best测试可作20轮选择范围的参照；不把20轮新训练冒称完整30轮预算，原历史dirty源码归档不足的可重建性边界保留。R06对R05：test ΔMAE+0.187（+1.773016%）、ΔRMSE+0.8537680849209188（+2.858225%）、ΔR²−0.007910696442368637；val MAE+1.566979%、RMSE−14.192415%，说明当前organ完整辅助方案没有整体测试收益，验证集RMSE改善未转化为测试改善。
+
+R08-LC对固定曲率R08：test ΔMAE−2.5489999999999995（−18.620790%）、ΔRMSE−4.342176355019156（−11.670329%）、ΔR²+0.046525305260386896；val MAE+2.425336%、RMSE−2.993717%、R²+0.004484437835005517。该固定seed/协议下测试三指标改善，支持可学习曲率版本值得进一步检验，但val MAE仍未改善，不能称稳定普遍有效、不能把曲率变化本身当收益证明；曲率与既有可学习alpha尺度仍存在耦合。R08-LC test MAE11.14仍高于organ基线R05的10.547，这属于跨prompt描述，不能用来单因素归因曲率。实验是在已看历史test后提出的探索性对照，不据此次test继续调阈值/曲率/系数或选择epoch；若要确认可重复收益，需要预先固定的配对多seed验证。
+
+结果文件（每个run均有）：`test_final/test_metrics.json`、`test_counts.json`、`checkpoint_metadata.json`、`checkpoint.sha256`、`verified.json`、`launch_verified.json`、`status`/`exitcode`及完整console；启动脚本快照eval_script.sh。汇总`runs/tpc268_v3_exclude3/planning/r06_r08lc_test_results_20261021.json`。R06测试后台PID1038552/推理PID1039245；R08-LC后台PID1038553/推理PID1039238，启动时宿主机核实PPID1、SID=后台PID、无TTY，GPU分别3/1。成功完成时间如上，不用历史PID存活推断当前状态。
+
+两份docs同步更新训练完成/val/test主表及结论；仅新增本地评估脚本与证据，没有修改main/model/loss/config、数据/标注、环境或在训R08-GD。此前测试准备/RUNNING记录按其时间理解，最新状态均DONE。
+
+
+## 2026-10-21 R08-GD-LC：GroundingDINO初始化、可学习曲率、TT/TV-only，20轮（准备）
+
+用户要求独立训练该设置20 epochs，本次准备并后台启动。ID=R08-GD-LC，run=`entailment_groundingdino_learnable_seed42_e20`，GPU1（启动前实查24124MiB空闲/0%，GPU3亦空闲）；不占用GPU2的R08-GD，后者只读日志已完成13轮且继续原30轮预算，不重启或改配置。新实验复用`config/cfg_tpc268_entailment_learnable.py`，独立入口`tools/train_tpc268_groundingdino_learnable.py`，本地启动脚本`runs/tpc268_v3_exclude3/run_r08_groundingdino_learnable_e20.sh`。当前HEAD=6341592d13575f3626bc70f08604b96ab231f4ef，新入口/配置尚未提交；正式启动另存commit/hash/原始参数及diff，不仅凭HEAD识别运行源码。
+
+计数主损失保留；辅助目标只有Lorentz TT/TV（各0.05，含原TT负父项/bridge），分层对比关闭。TT/TV共享可学习log_c，初始c=1、空间曲率−c、有效范围[0.1,10]，继续学习alpha_t/alpha_v；沿用AdamW lr1e-4/wd1e-4、StepLR10，无曲率专用学习率或额外正则，首轮辅助warmup。seed42、20轮、FP32、train batch4/eval实际batch1、冻结backbone.0/bert、原resize/crop增强/2px中心监督、三图代码排除、原registry/alias/坐标协议和6998/999/2000、3exemplars及整图800/1333阈值.23/0全部保持。主caption仍为R系列`{organ} of {species}; taxonomy: {Kingdom}, ..., {Species} .`，缺链原species回退；保留修复mask，不切换P系列模板或旧mask。
+
+模型独立从官方`checkpoints/groundingdino_swinb_cogcoor.pth`初始化，SHA256=46270f7a822e6906b655b729c90613e48929d0f2bb8b9b76fd10a856f3ac6ab7。复用已核验的严格GroundingDINO加载函数：共享1106项加载，40项CountGD专有参数及12项taxonomy参数/持久buffer按seed42构造初始化；只丢弃已知label_enc及固定arange position_ids，其他差异拒绝。不从任何TPC/FSC147已训练权重或CPU检查模型续训，不加载预训练optimizer/scheduler/RNG。主仓库既有.venv和Python3.10.12/torch2.13.0+cu130/torchvision0.28.0+cu130/transformers4.57.6，uv离线no-project显式解释器，不安装或同步环境。
+
+配对关系预先固定：①对R08-LC同为20轮、有效配置完全相同，只更换初始化来源；②对R08-GD同GroundingDINO初始化与TT/TV实现，只有learn_curvature=False→True以及预算30→20，后续按R08-GD前20轮val MAE选择的权重比较，StepLR不依赖总epochs；现有R08-GD尚未完成20轮，此参照的best/性能未知，不把当前13轮best或未来30轮best直接当等预算结果。新实验只按20轮val MAE选best，结束独立重评999图val，不自动test。已看历史test后提出，属于探索性对照，不按test调阈值/曲率/lambda或选epoch。
+
+新入口只为本进程fresh训练设置初始化适配；旧`tools/train_tpc268_groundingdino.py`及原R08-GD脚本/共享main/model/loss/Dataset均未改，新旧入口复用相同严格加载函数。旧入口hash仍等于其launch_sources快照。启动脚本核对两对照的有效配置差异及全部训练manifest源码/资产hash、环境/权重SHA，CPU实际构造/严格加载并检查log_c为Parameter、唯一进入优化器、有限非零梯度及一步更新，然后另进程重新初始化seed42正式20轮。flock、防已有训练产物隐式resume/覆盖、GPU空闲检查、status/stage/exitcode、运行源码与曲率清单均保留。
+
+bash -n、新入口和内嵌Python AST已通过；真实CPU/GPU检查待启动脚本执行，不提前写通过，不填未知best/val/test。数据、标注、环境及已有训练不改；两份docs同步记录。
+
+```bash
+cd /home/new_space_1/new_space_1_for_lijiahui/research/CountGD
+nohup setsid bash runs/tpc268_v3_exclude3/run_r08_groundingdino_learnable_e20.sh > runs/tpc268_v3_exclude3/launch_entailment_groundingdino_learnable_seed42_e20.log 2>&1 < /dev/null &
+```
+进度：`tail -f runs/tpc268_v3_exclude3/launch_entailment_groundingdino_learnable_seed42_e20.log`。此段为准备记录，实际启动核验另记。
+
+
+### 2026-10-21 R08-GD-LC启动检查发现并记录监控依赖元数据差异
+
+首次仅运行CPU前的源码检查，于12:04:36因pyproject.toml/uv.lock相对两对照的hash不同而退出1，未进行模型训练、未产生训练checkpoint/log.txt。失败证据保留新run/prelaunch_attempt_1/。检查发现这两个文件在12:02:13被会话外同步修改：pyproject仅新增dev组nvitop>=1.7.1，原project及uv训练依赖配置完全相同；锁文件新增nvitop/psutil/nvidia-ml-py/windows-curses、根项目元数据hgic→countgd并更新下载镜像/辅助元数据，所有共同包的锁定版本无变化。保留这些用户工作区改动，不回退或安装/sync。
+
+实际核对原锁文件中的63个已安装依赖版本均未改变；colorama为未安装的可选平台包，hgic为旧根项目元数据。Python/torch/torchvision/transformers仍3.10.12/2.13.0+cu130/0.28.0+cu130/4.57.6，native扩展SHA256=c58d6ff7e9a8fad209d099fd1e058f86afd3567b8960311b75fbb290ee1ad4ee，与R08-LC刚完成test记录相同。完整审计见planning/r08_gd_lc_environment_20261021.json。该核对证明原训练依赖版本/核心native一致，不声称新增监控包后整个site-packages逐字节相同。
+
+新脚本仅为这两个文件加入精确新hash白名单，并每次校验该审计、63个原依赖实际版本、native hash及其他全部源码/资产hash；不忽略任何模型/数据/配置变化，不放宽checkpoint加载。正式run清单另存dependency_metadata_delta/audit及新lock hash，完整环境身份含这项监控工具差异；与旧对照比较须保留此边界，后续确认性配对运行应统一同一依赖快照。依然使用uv --offline --no-project显式原解释器，锁文件不参与安装或训练依赖解析。首次失败不是模型/曲率故障，重试仍fresh GroundingDINO/seed42，已有R08-GD不变。两份docs同步补记。
+
+
+### 2026-10-21 R08-GD-LC正式训练已启动（2026-10-21T12:09:14.572465+08:00）
+
+新run=entailment_groundingdino_learnable_seed42_e20，GPU1；正式TRAINING阶段开始12:08:05。后台PID1060614，PPID1/SID1060614/无TTY；实际训练PID1061031已在宿主机核实使用GPU1（UUID=GPU-b82ea893-51d2-9c44-dfcf-fe24537493c1），nohup+setsid独立于SSH。当前第1/20轮（epoch0），已输出batch20/1749，完整train+val轮次0，best/val/test均未知，不重复启动。
+
+真实CPU构造/严格加载通过；log_c为可学习Parameter、唯一进入原优化器普通lr1e-4组，合成几何梯度0.2475481778383255，一步AdamW使c由1→0.9998999834060669，非法锥0。该CPU模型未用于正式训练；正式进程重新seed42/加载原始GroundingDINO。GPU正式加载共享1106项，CountGD构造初始化40项、taxonomy构造初始化12项；前20批日志loss有限，最新loss=293.7841，包含TT/TV、无level_contrast，锥非法率0。实际训练日志c已由初始1更新至0.9998，证明真实训练中曲率在更新，尚不代表计数性能改善。
+
+启动HEAD=6341592d13575f3626bc70f08604b96ab231f4ef，新入口/配置未提交，另存launch_sources双入口及启动脚本/依赖元数据/环境审计快照和hash；launch_manifest保留配置、曲率及优化器设置/源码资产hash/元数据差异，launch_verified保留实际进程、首批运行证据。相对R08-LC有效配置零差异；相对R08-GD只epochs30→20、learn_curvature False→True；77/80份其余源码/资产hash逐项一致，只有已审计pyproject/uv.lock监控依赖元数据差异，63个原已安装依赖版本及native hash仍相同。不把整个环境逐字节相同作为比较前提，后续确认性配对需统一完整快照；不放宽模型或数据检查。
+
+本次核对初始化报告也纠正文档中的计数笔误：此前“38项CountGD专有参数”应为40项（3层encoder每层12项，共36项，加encoder最终norm与feature_map_proj各2项）；原严格加载代码和缺失名单始终正确，代码/权重未因此改动。两份docs相关文字同步更正。
+
+训练将按预定20轮继续，每轮完整999图val，按val MAE选择best，结束重评同best的val；不自动test。启动日志`runs/tpc268_v3_exclude3/launch_entailment_groundingdino_learnable_seed42_e20.log`，训练日志/状态/清单位于新run。没有修改共享main/model/loss/Dataset、已有GroundingDINO入口或GPU2上R08-GD，数据/标注不改；两份docs同步更新。首次失败仅为依赖元数据预检查，先前PREPARING/FAILED均有历史证据，当前正式状态TRAINING。
+
+
+## 2026-10-21 R06-ELC：器官文本、删除对比、可学习曲率、20轮（准备）
+
+用户明确要求基于R06，删除对比损失、只保留双曲蕴涵辅助目标并采用可学习曲率，空闲GPU后台训练20轮。新ID=R06-ELC，run=`organ_entailment_learnable_seed42_e20`，GPU3；首次GPU查询曾见其他用户短时占用约5GiB，复查已退出、24124MiB空闲/0%，启动脚本再次要求used≤64MiB且free≥20000MiB，避免与现有任务共享训练卡。GPU1/GPU2上的R08-GD-LC/R08-GD不变。
+
+新增`config/cfg_tpc268_organ_entailment_learnable.py`继承R06的cfg_tpc268_organ_full.py，设置use_level_contrast=False、learn_curvature=True、curvature_init=1、epochs=20。有效配置与R06实际20轮配置逐项核对，只差contrast True→False、曲率学习False→True；与20轮R08-LC只差prompt_mode full_taxonomy→organ。主caption仍为`{organ} .`（如`fruit .`），不额外加入species/taxonomy主文本，但训练辅助TT/TV继续按原registry使用分类及species-organ任务文本。保留CountGD计数主损失；TT/TV各0.05，含原TT负父项/bridge，分层对比计算关闭，lambda_contrast存储值虽为0.1但不产生该loss。
+
+共享Lorentz曲率由c=1起学习，有效c范围[.1,10]，空间曲率−c；既有alpha_t/alpha_v仍学习；普通AdamW参数组lr1e-4/wd1e-4、StepLR10、首轮辅助warmup，无新增几何公式/正则或曲率专用lr。相同FSC147 CountGD checkpoint_fsc147_best.pth独立model-only初始化（SHA256=c1bab864b17db345b4c6e3aaabb5765bc2c0a90d0bc8defb5e664a74a50aa126），不从R06/TPC最佳权重或技术检查模型续训，不载入预训练optimizer/scheduler/RNG。seed42，train batch4/eval实际batch1，FP32、workers4、原冻结/增强/2px中心监督、修复mask、三图代码排除6998/999/2000、registry/坐标协议、3exemplars和整图800/1333阈值.23/0均保持。数据及标注不改。
+
+现有主.venv，uv --offline --no-project显式解释器，不安装/同步环境。沿用已经审计的nvitop监控dev元数据差异：63个原已安装依赖版本、Python/torch/torchvision/transformers和native扩展hash仍要求与审计完全一致；相对R06/R08-LC只允许pyproject/uv.lock两个已知新hash，模型/数据/旧配置任何变化均拒绝。记录完整新环境元数据；不声称site-packages逐字节相同，后续确认性配对仍应统一完整快照。
+
+本地脚本`runs/tpc268_v3_exclude3/run_r06_entailment_learnable_e20.sh`：flock/空闲GPU检查、防已有产物隐式resume、保存commit/diff/源文件及初始化/data协议hash、CPU实际构造并用原严格load_countgd_state加载FSC147（仅允许新增12项auxiliary状态）、log_c Parameter与优化器唯一性/有限非零合成几何梯度/一步更新检查；该CPU模型丢弃，另进程fresh seed42正式20轮，每轮完整val按MAE选best，结束重评999图best-val，不自动test。训练入口仍为原main.py，不更改共享模型/loss/Dataset/其他在训配置。
+
+配对解释：相对R06同时“关闭对比”和“学习曲率”，任何差异只能归因这组联合改动，不能隔离其中一项；R08-LC为同初始化/目标/曲率/20轮而仅主prompt不同的参照；R05前20轮best仍第12轮，可作为organ无辅助基线的等选择预算参照，但其历史dirty源码边界保留。新实验在看过R06/R08-LC测试后提出，属于探索性验证，不用test挑epoch或调阈值/曲率/lambda。准备HEAD=6341592d13575f3626bc70f08604b96ab231f4ef，配置/文档及既有入口有未提交改动，正式启动身份由hash/参数清单记录；当前尚无真实best/val/test，实际CPU/GPU检查待运行。两份docs同步更新。
+
+```bash
+cd /home/new_space_1/new_space_1_for_lijiahui/research/CountGD
+nohup setsid bash runs/tpc268_v3_exclude3/run_r06_entailment_learnable_e20.sh > runs/tpc268_v3_exclude3/launch_organ_entailment_learnable_seed42_e20.log 2>&1 < /dev/null &
+```
+进度：`tail -f runs/tpc268_v3_exclude3/launch_organ_entailment_learnable_seed42_e20.log`。此段为准备记录，实际启动另记。
+
+
+### 2026-10-21 R06-ELC短时GPU占用与自动等待
+
+首次后台PID1385232仅运行预检查：17:29:13启动时GPU3再次有其他任务约4806MiB占用、free19319MiB，因此空闲断言拒绝并退出1；没有模型训练或checkpoint/log.txt，证据保留新run/prelaunch_attempt_1/。不终止或调整其他用户进程。
+
+新脚本改为先完成CPU配置/权重/梯度检查，随后在后台每15秒只读查询GPU3；used≤64MiB且free≥20000MiB时才进入正式TRAINING，新状态WAITING_FOR_GPU、启动前gpu_at_training_start.csv及manifest.idle_gpu_at_training_start记录实际空闲证据。CPU检查模型丢弃，正式进程仍从原FSC147/seed42 fresh初始化，20轮协议不变。此改动只涉及新脚本调度，不改已有训练或模型/数据/环境；两份docs同步记录。重试PID/真实训练状态待核实。
+
+
+### 2026-10-21 R06-ELC正式训练已启动（2026-10-21T17:32:33.971827+08:00）
+
+run=organ_entailment_learnable_seed42_e20，GPU3，后台PID1386799/训练PID1387249，宿主机已核实PPID1/SID1386799/无TTY，实际GPU3分配训练进程显存9228MiB（核实时瞬时值），nohup+setsid防SSH断连。进入TRAINING于17:31:27，此时GPU3实测used1MiB/free24124MiB，空闲门槛已通过，不与启动前短时任务共享。当前第1/20轮（epoch0），最新batch20/1749，完整轮次0；best/val/test均未知。
+
+预检实际CPU模型严格加载FSC147共享1146项，仅允许新增12项taxonomy参数/持久buffer，unexpected为空；新log_c为Parameter且唯一进入优化器，合成几何梯度0.2475481778383255有限非零，AdamW一步使c由1→0.9998999834060669。正式训练另进程从原FSC147重新seed42初始化，未使用CPU检查状态，也没有从R06最佳或最后一轮续训。
+
+真实GPU前20批loss有限，最新loss=4.9626；包含loss_entail_tt/loss_entail_tv、不含loss_level_contrast，锥非法率0。曲率由初始1更新至日志0.9994，确认实际训练中正在学习，但不推断性能。有效配置与R06只差use_level_contrast True→False及learn_curvature False→True，与R08-LC只差prompt_mode；76/77份原源码/资产hash一致，另外pyproject/uv.lock仅为已审计监控元数据差异，63项原依赖版本及native hash保持匹配。保留该环境身份边界，不声称整体site-packages逐字节相同。
+
+启动HEAD=6341592d13575f3626bc70f08604b96ab231f4ef，新配置/文档及此前工作区修改尚未提交；launch_sources保存新配置/脚本、pyproject/uv.lock和环境审计快照及hash，launch_manifest记录曲率协议、初始化/data/source hash与启动前GPU空闲证据，launch_verified记录进程和首批日志检查。数据/标注、main/model/loss/Dataset及已有运行均未改。训练继续预定20轮，每轮完整val按MAE选best，结束重评999图best-val，不自动test。两份docs同步更新主状态表及本记录，之前PREPARING/首次预检失败均为历史记录；当前正式TRAINING。
+
+进度：`tail -f runs/tpc268_v3_exclude3/launch_organ_entailment_learnable_seed42_e20.log`；启动已成功，无需再次执行。
+
+
+## 2026-10-22 R08-GD第25轮最佳权重完整测试集评估（准备）
+
+已读取run `entailment_groundingdino_seed42` 的30条完整val日志、DONE/exitcode0及独立best-val；训练于08:23:56结束，按30轮最低val MAE选择第25轮（epoch24），val999图=10.565565565565565/33.0083709466637/0.9048583997504364（MAE/RMSE/R²）。此前该run没有test产物。用户授权评估，宿主机09:41核实GPU2空闲（used1MiB/free24124MiB）；不占用GPU1/GPU3的在训任务。
+
+新增本地脚本 `runs/tpc268_v3_exclude3/run_r08_groundingdino_test.sh`，沿用既有best-test实现，显式GPU2/uv离线原解释器/nohup+setsid、flock和防重复结果，严格加载完整最佳checkpoint，不重新训练或使用GroundingDINO原始权重作推理。沿用R08-GD full_taxonomy、3 exemplar、修复mask、三图排除、整图800/max1333、阈值0.23/text0、无crop/SAM/NMS/计数校正，实际eval batch1。完整2000图test；只评估val选定的第25轮，不按test选择epoch或调参。
+
+预检查记录checkpoint轮次/val/曲率与有效配置、源文件和数据hash、GPU/源码HEAD及dirty diff；仅允许已审计nvitop监控依赖导致的pyproject.toml/uv.lock两个精确hash差异，逐项复查63项原依赖版本及native hash。保留完整环境身份差异，不声称所有文件逐字节相同；不安装/同步依赖。完成后核对全部测试路径唯一且等于官方split、GT等于原始点数、整数预测，并独立重算三指标，核对best-val推理协议及测试前后权重SHA。产物写入run的`test_final/`，实测指标/启动PID/完成状态待运行后记录。模型/loss/config、数据/标注均未改，两份docs同日同步更新。
+
+```bash
+nohup setsid bash runs/tpc268_v3_exclude3/run_r08_groundingdino_test.sh > runs/tpc268_v3_exclude3/launch_entailment_groundingdino_seed42_test.log 2>&1 < /dev/null &
+tail -f runs/tpc268_v3_exclude3/launch_entailment_groundingdino_seed42_test.log
+```
+
+### 2026-10-22 R08-GD测试已启动（09:44 Asia/Shanghai）
+
+启动预检通过，后台PID2175382/推理PID2175880，宿主机核实PPID1、SID2175382、无TTY，GPU2实际推理显存约3004MiB。09:44:05进入RUNNING，已处理140/2000图。checkpoint epoch24与完整30轮最低val MAE一致，固定c1；源文件/数据/初始化hash除两项已审计监控元数据外均匹配，63个原依赖版本及native hash通过。证据`test_final/checkpoint_metadata.json`、`dependency_metadata_audit.json`、`gpu_at_eval_start.csv`与`launch_verified.json`。此时没有完整test指标，待结束核验。其余在训任务不受影响，两份docs同步记录。
+
+
+## 2026-10-22 R08-GD完整测试完成与核验修正（09:52 Asia/Shanghai）
+
+run `entailment_groundingdino_seed42`，第25轮（epoch24）best，固定c=1。GPU2于09:44:05开始，全部2000图推理于09:51:24前完成；最终指标MAE=19.024，RMSE=49.7240786742198，R²=0.6219300579384277。独立best-val999图=10.565565565565565/33.0083709466637/0.9048583997504364。训练/评估HEAD均实查为6341592d13575f3626bc70f08604b96ab231f4ef，但训练入口及其他修改未提交，身份以launch_manifest/source hash和工作区记录为准。
+
+初次pipeline退出1是**推理后的核验脚本错误**：从20轮脚本适配30轮时，字符串替换误将`len(rows) == 2000`变成`== 3000`；实际模型推理完整、输出2000图。只将预期数恢复官方2000，未修改任何计数/指标文件、模型、配置、阈值、权重或数据，未重跑推理。原FAILED/exitcode1/原脚本保存`test_final/verification_attempt_1/`，修正脚本保存`eval_script.sh`；`verification_recovery.json`保留推理0、原后处理1、修正核验0及恢复过程。最终状态DONE，exitcode0表示修正核验完成，不抹去原pipeline失败。
+
+09:52:23独立核验通过：2000路径唯一且完全等于官方test split，GT逐图等于原始annotation点数，预测为非负整数，MAE/RMSE/R²重算一致（R²浮点末位差异在容差内）；推理及training_protocol与独立best-val一致。最佳checkpoint SHA256=`806bd3ca6d7e55a806ee8848d269d2ade2c03c714d1ae05d5c99c780fd3a04b5`，测试前后相同。80份原源码/资产hash保持一致，只有已审计两个监控依赖元数据文件不同，63项原依赖实际版本和native hash再次检查通过；保留完整环境身份边界。09:52:51宿主机核实GPU2已释放（used1MiB/free24124MiB），GPU1/GPU3原训练进程仍在。
+
+相对同30轮的固定曲率R08：test ΔMAE=+5.335（+38.97289795%），ΔRMSE=+12.517103521703035（+33.64181977%），ΔR²=−0.16638625597000756；val三指标也较差。本次单seed对照支持FSC147 CountGD初始化比GroundingDINO初始化更适合当前TT/TV全分类文本协议，不能证明双曲几何本身无效。R08-GD-LC只训练20轮，其固定曲率配对应取R08-GD前20轮val选择范围，本次30轮第25轮权重不可冒称该等预算参照；本次不据test修改后续训练或选择其他epoch。
+
+证据：`test_final/test_metrics.json`、`test_counts.json`、`checkpoint_metadata.json`、`verified.json`、`checkpoint.sha256`、`verification_recovery.json`及完整console；汇总`planning/r08_gd_test_results_20261022.json`。两份docs同步更新状态/结果和分析；本次实现仅本地评估脚本及其核验修正，模型/loss/config、数据/标注和既有训练均未修改。
+
+
+## 2026-10-22 R08-GD-LC训练完成与最佳权重test准备（13:56核查）
+
+新结束实验为R08-GD-LC，run `entailment_groundingdino_learnable_seed42_e20`，训练/最佳权重独立val于13:23:37 DONE、退出0，20条完整val日志按最低MAE选第12轮（epoch11），val999图=10.891891891891891/31.309859586195962/0.9143978821993909。尚无test产物。与此同时R06-ELC仍在GPU3训练（本次只读快照完成17轮，当前轮次未精确核查），不是此次新完成实验。
+
+设置保持原计划：GroundingDINO Swin-B原始权重fresh初始化（非FSC147 CountGD、非TPC续训），CountGD主计数损失保留，辅助仅Lorentz TT/TV .05/.05，contrast关闭；TT/TV共享可学习c，初始1、范围[0.1,10]，投影头/学习尺度及原TT负父项/bridge均不改。主caption为R系列`{organ} of {species}; taxonomy: {Kingdom}, ..., {Species} .`，分类不全按原R协议回退species；评估3图像exemplar。seed42、20epochs、train batch4/eval实际batch1、原冻结/增强/AdamW/StepLR10/修复mask/三图代码排除及原环境保持。
+
+用户授权缺失test则补测。新增本地`run_r08_groundingdino_learnable_test.sh`，固定GPU1/uv离线原解释器，nohup+setsid、flock、防覆盖、严格完整best checkpoint加载，绝不重新初始化或续训。当前各GPU均有其他任务，13:56实查GPU1剩余17891MiB，选择该卡共享评估，预检和正式开始再次要求至少8192MiB；此前同类测试进程约3004MiB，不终止/调整任何既有任务。不把共享卡写成空闲卡。
+
+完整2000图test，沿用训练对应全分类caption/3exemplar及整图800/max1333、阈值.23/text0、无crop/SAM/计数校正；仅评估val选定的第12轮。新脚本逐项复查训练清单89份源码/资产hash、63项原依赖实际版本/native hash、有效配置及best轮次，记录best实际c。该run启动时已审计nvitop监控元数据，因此本次要求与其自身完整manifest hash一致，不另忽略文件差异。完成后核对官方2000唯一路径、GT原始点数、非负整数预测、重算三指标、best-val协议和checkpoint前后SHA；准备阶段PID/实际test/c暂未知。
+
+配对参考：R08-LC同20轮仅初始化不同；R08-GD固定曲率的**前20轮**最佳同为第12轮，日志val=10.578578578578579/31.36271065484646/0.9141086453992188，不能拿其30轮第25轮当等预算曲率参照，前20轮参照test尚未知。此处仅由日志核对选择范围，不额外启动固定曲率权重测试，也不按test调参。两份docs同步更新；模型/loss/config、数据/标注和已有训练均不改。
+
+```bash
+nohup setsid bash runs/tpc268_v3_exclude3/run_r08_groundingdino_learnable_test.sh > runs/tpc268_v3_exclude3/launch_entailment_groundingdino_learnable_seed42_e20_test.log 2>&1 < /dev/null &
+```
+
+### 2026-10-22 R08-GD-LC测试已正式运行（13:58:47核实）
+
+13:58:28进入RUNNING，后台PID2474953（PPID1/SID2474953/无TTY），推理PID2475436；宿主机实查GPU1约3004MiB，该卡原进程2422347约6224MiB仍在，未终止或改动既有任务。完整best checkpoint严格加载missing/unexpected均为空，epoch11=第12轮；最佳权重c=0.6318109631538391，SHA256=c96f5f5393cf5374b017e47ce16ea7a16fa2964b0e72e87adc7acea53ff39c8f。89份源码/资产hash与本run训练manifest逐项相同，63项原依赖实际版本/native hash一致；源HEAD及dirty diff、实际显存/进程及最佳权重信息留存test_final。训练参数/推理协议未改；当前仅确认启动，完整test指标待结束核验。两份docs同步记录。
+
+
+## 2026-10-22 R08-GD-LC第12轮best完整测试完成（14:07:58）
+
+run `entailment_groundingdino_learnable_seed42_e20`，20轮/seed42，训练及独立best-val于13:23:37 DONE/退出0；新测试于13:58:28开始、14:07:58 DONE/退出0。GPU1共享推理约9分07秒，后台PID2474953、推理PID2475436，14:08:30实查测试进程显存已释放，该卡原任务2422347及GPU3原训练仍在。未改动或终止其他进程。
+
+| 数据 | 最佳轮次 | 图像数 | MAE | RMSE | R² |
+|---|---:|---:|---:|---:|---:|
+| val（独立best重评） | 12 | 999 | 10.891891891891891 | 31.309859586195962 | 0.9143978821993909 |
+| test（本次实测） | 12 | 2000 | 15.462 | 42.50356455639927 | 0.7237582172256081 |
+
+最佳权重c=0.6318109631538391，初始c1；共享可学习Lorentz曲率，TT/TV .05/.05、无contrast，CountGD主计数损失保留。输入为3图像exemplar + R全分类文本（含organ/species及taxonomy；缺失分类链按原R协议回退species），不是P系列官方逗号文本。GroundingDINO原始Swin-B fresh初始化，非FSC147模型续训；冻结、增强、优化、修复mask、三图排除、seed42和整图阈值/推理设置均沿用本run原协议。评估实际batch1，checkpoint metadata额外记录learn_curvature/初始c/最佳c，补足旧training_protocol摘要未包含这些字段的边界。
+
+14:07:57独立核验：2000条路径唯一且完全等于官方test split，GT等于原annotation点数，预测为非负整数；从逐图计数重算MAE/RMSE/R²一致（R²末位浮点误差在容差内）；推理设置及training_protocol与best-val一致。checkpoint SHA256=`c96f5f5393cf5374b017e47ce16ea7a16fa2964b0e72e87adc7acea53ff39c8f`，测试前后未变。89份源/资产hash与该训练启动manifest完全相同，63项原依赖实际版本/native hash检查通过。训练/测试HEAD实查均6341592d13575f3626bc70f08604b96ab231f4ef，dirty源身份仍以清单/hash/diff为准；本run启动时已有已审计nvitop元数据，未更换或同步环境。
+
+同20轮、同可学习曲率的初始化配对R08-LC：val MAE+6.46771037%、RMSE+9.37897012%、R²−0.014050929704103043；test MAE+4.322（+38.79712747%）、RMSE+9.638765758901663（+29.32854030%）、R²−0.11108340194321409。当前seed42下改GroundingDINO初始化没有性能收益。与GD30轮最终test相比三指标较好，但20与30轮选择范围不同，不据此归因曲率；GD前20轮最优第12轮val=10.578578578578579/31.36271065484646/0.9141086453992188，对应test尚未知。因此当前GD初始化下尚无完整等预算test的曲率结论，也不能扩大成所有双曲方案均无效；不据test改变在训实验、阈值或选择epoch。
+
+证据位于`test_final/`：`test_metrics.json`、`test_counts.json`、`checkpoint_metadata.json`、`verified.json`、`checkpoint.sha256`、`launch_verified.json`、`gpu_at_eval_start.csv`、`status`/`exitcode`及完整console/脚本快照。汇总`planning/r08_gd_lc_test_results_20261022.json`。两份docs同步更新主表与分析；本次仅本地评估脚本/结果记录，无模型/loss/config、数据/标注改动。
