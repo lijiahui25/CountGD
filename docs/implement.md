@@ -1,6 +1,6 @@
 # CountGD → TPC-268 实现记录
 
-更新：2026-10-22。实现/数据协议基线：`0c99a25`，当前main代码HEAD为`6341592d13575f3626bc70f08604b96ab231f4ef`；原数据协议和三图代码排除保持。本文描述本仓库**实际**实现；训练顺序、命令及实测结果记录在 [experiment.md](experiment.md)。以后每次修改代码、配置或数据协议，同步更新这两个文件。
+更新：2026-10-25。实现/数据协议基线：`0c99a25`，当前main代码HEAD为`92edcb72b986181bdd7c68ca7d74689d77b45466`；原数据协议和三图代码排除保持。本文描述本仓库**实际**实现；训练顺序、命令及实测结果记录在 [experiment.md](experiment.md)。以后每次修改代码、配置或数据协议，同步更新这两个文件。
 
 ## 与原 CountGD 的边界
 
@@ -619,3 +619,175 @@ R08-LC为同20轮初始化来源参照；固定GD前20轮日志最优第12轮val
 本次新增本地评估脚本的实际运行已13:58:28–14:07:58 DONE/退出0，GPU1共享推理约9分07秒，14:08:30实查测试进程释放显存；既有其他任务继续。严格完整best加载无missing/unexpected，89份源/资产hash等于本训练manifest，63项原依赖版本/native hash不变。路径全且唯一等于官方2000测试集合、GT=原annotation点数，非负整数预测、独立重算三指标和best-val推理/training_protocol均一致；SHA256 c96f5f5393cf5374b017e47ce16ea7a16fa2964b0e72e87adc7acea53ff39c8f 测试前后不变。曲率/初始c/learn_curvature单独保存checkpoint metadata，避免旧协议摘要未含这些字段造成误解。
 
 相对同20轮R08-LC仅改初始化，val三指标退化，test MAE增加38.7971%、RMSE增加29.3285%、R²降低0.1110834；当前单seed下FSC147 CountGD初始化仍较好。与GD30轮比较混入预算/最佳权重选择范围差异；GD前20轮日志最优第12轮的val虽已核实，对应test仍未知，不把不等预算差异当曲率的单因素收益。完整成绩、设置、证据/时间和分析同步experiment.md及planning/r08_gd_lc_test_results_20261022.json；两份docs同日更新，模型/loss/config、数据/标注、环境及在训任务均未改动。
+
+
+## 2026-10-22 虚拟环境终端提示名称修正（不改变实验协议）
+
+用户已将`.venv/pyvenv.cfg`的prompt改为countgd，但uv创建环境时生成的激活脚本仍嵌入hgic，激活不会重新从pyvenv.cfg读取该字段，因此自动激活继续显示旧名称。本次只把主`.venv/bin/`下activate、activate.bat/csh/fish/nu/ps1/xsh与activate_this.py中的嵌入提示名称统一为countgd，保留其他字节/换行及脚本权限；pyvenv.cfg沿用用户设置。已用独立bash实际激活/退出验证提示名称及原提示恢复。
+
+这仅影响后续shell激活时显示的环境名称，不修改解释器、依赖包、CUDA算子、pyproject/uv.lock、训练/推理代码、数据或实验协议；现有运行进程和实测结果不变，无需新实验基线。已打开终端需要重新source .venv/bin/activate或重开终端才能更新其进程内提示。两份docs同日同步补记。
+
+
+## 2026-10-23 R06-ELC最终best测试准备
+
+实查R06-ELC已于10月22日16:46:26完成20轮及独立best-val，退出0，按val MAE选最终第18轮（原第5轮best已更新）；val999=10.186186186186186/32.983570393696255/0.9050013136725523，test尚无产物。该run为FSC147 CountGD fresh初始化、organ caption `{organ} .`、3exemplar、主计数损失+TT/TV .05/.05、无contrast、共享可学习c（初始1/[.1,10]）、20轮seed42；不改已有实现和数据协议。
+
+用户授权补test，本次仅新增本地run_r06_entailment_learnable_test.sh与文档记录，main.py --eval --eval_split test --resume完整第18轮best，在实查空闲GPU3后台nohup+setsid/uv离线原解释器运行。新脚本明确20轮/2000图，预检训练89项源/资产hash、63项原依赖版本/native、最佳轮次/配置/最佳实际c，结束核对完整官方2000路径、GT原点数、整数预测、重算三指标、best-val推理/training_protocol和权重前后SHA。最佳c/PID/实测test/完成状态待实际运行；不改模型/loss/config、数据/标注或环境，不引入新推理设置。两份docs同步补记设置/命令/结果准备；与R06涉及两开关联合变化，不能单独归因，保留与R08-LC仅主文本不同的20轮参照。
+
+### 2026-10-23 R06-ELC测试启动核实（10:53:06）
+
+10:52:28进入RUNNING；后台PID3351310/推理PID3351689，宿主机核实PPID1、SID3351310、无TTY，GPU3推理约3004MiB，当前110/2000图。严格加载最终best epoch17=第18轮，无missing/unexpected；best c=0.6272836327552795，SHA256=6be3e8a78cd2df96046055767c3678e5b1e7ea50f392dc5c6c1f6b9f01bbfb47。89份源/资产hash与本run训练manifest一致，63项原依赖实际版本/native hash通过。训练HEAD6341592d13575f3626bc70f08604b96ab231f4ef，评估HEAD92edcb72b986181bdd7c68ca7d74689d77b45466，不能仅凭HEAD差异推断运行代码变化；实际被核验的模型/数据/配置/native源hash均相同。已有shell提示名称countgd改动只影响激活显示，不影响解释器/依赖或运行进程。完整test指标仍待结束核验；两份docs同步补记。
+
+
+## 2026-10-23 R06-ELC最终best完整测试完成
+
+R06-ELC训练20轮、seed42，10月22日16:46:26完成及独立best-val；最终按val MAE选第18轮（epoch17），已更新先前第5轮best。best c=0.6272836327552795（初始1、TT/TV共享可学习c），val999=10.186186186186186/32.983570393696255/0.9050013136725523，test2000=11.2675/31.181188239064912/0.851329780365249。
+
+原设置保持FSC147 CountGD fresh初始化、organ caption `{organ} .`+3exemplar、主计数损失+TT/TV .05/.05、无contrast。新本地评估脚本在GPU3于10月23日10:52:28–10:58:57 DONE/退出0，实际推理约6分07秒，10:59:39实查已释放显存。完整官方2000唯一路径、GT原点数、非负整数预测、重算三指标和best-val推理/training_protocol全部核验一致；checkpoint SHA256 6be3e8a78cd2df96046055767c3678e5b1e7ea50f392dc5c6c1f6b9f01bbfb47 测试前后不变。89份源/资产hash及63项原依赖版本/native hash与该run训练匹配；训练HEAD6341592、评估HEAD92edcb7（完整值见清单），按实际hash识别源码，不凭HEAD推断代码变化。曲率相关字段额外保存在checkpoint metadata，补足旧摘要边界。
+
+相对R05器官无辅助基线，test MAE增加6.8313%、RMSE增加4.3877%、R²降低0.01223525；val MAE较好而val RMSE/R²较差。R05前20轮日志仍选第12轮同best，保留原30轮实际预算和历史归档边界。相对同20轮R06，test三指标也较差（MAE+4.9702%），本次同时关闭contrast并学习曲率，不能单独归因其中一项。相对同20轮R08-LC，仅主caption不同，test MAE+1.1445%但RMSE−5.1228%/R²+0.01648816；不能称organ全面改善。当前设置未显示测试整体收益，结论限seed42和既有协议，不根据test换epoch/调参。
+
+完整设置、状态、成绩、证据及比较同步experiment.md与planning/r06_elc_test_results_20261023.json；两份docs同日更新。实现改动仅本地评估脚本和记录，不修改模型/loss/config、数据/标注、环境或原训练协议。
+
+
+## 2026-10-23 R04-ELC：器官+物种主caption配对配置（准备）
+
+用户授权在R06-ELC基础上只改主文本为器官+物种，其余设置一致并找空闲GPU后台运行。新增cfg_tpc268_species_entailment_learnable.py继承cfg_tpc268_organ_entailment_learnable.py，仅设prompt_mode='species'。直接复用已有counting_phrase的`{organ} of {species} .`，不带taxonomy祖先后缀；没有更改Dataset、主模型、loss、数据/标注或既有配置。新ID R04-ELC，run species_entailment_learnable_seed42_e20，正式GPU2（11:27实查空闲）。
+
+继续原FSC147 CountGD model-only fresh初始化，seed42/20轮、主计数损失+Lorentz TT/TV .05/.05、contrast关闭、共享可学习c初始1/[.1,10]、alpha尺度及TT负父/bridge均相同；保留训练辅助分类文本/监督，不能把删除主caption祖先文本误称删除辅助taxonomy。原冻结/增强/优化/FP32/batch/3exemplar/修复mask/三图排除/registry/推理和uv离线原环境不变，不从R06-ELC最佳权重或末轮续训。
+
+新增本地run_r04_entailment_learnable_e20.sh，仅为新run调度，nohup+setsid/flock、防隐式resume/覆盖，正式GPU启动门槛used≤64MiB/free≥20000MiB。启动时核对R06-ELC仅prompt_mode变化、89份原源/资产hash与63项原依赖/native一致；全split caption/token/路径/GT和9例同RNG增强的图像/非文本target检查，CPU严格初始化与曲率参数检查。CPU检查模型丢弃后独立新GPU进程fresh训练20轮→按val MAE选best→独立best-val，不自动test。准备时仅语法检查已过，实际检查/PID/运行状态/实测val/test待执行后记录。
+
+R06-ELC为主要输入配对基线，R08-LC为同20轮full-taxonomy参照；相对R04原实验还存在loss/预算变化，不能只归因文本。完整设置、启动命令与状态同步experiment.md；两份docs同日更新，新配置未提交，运行另存源码/hash/diff，保留探索性单seed边界。
+
+### 2026-10-23 R04-ELC正式训练已启动（11:36:43核验）
+
+run species_entailment_learnable_seed42_e20在GPU2于11:35:38正式TRAINING，启动空闲used4MiB/free24121MiB。后台PID3410506（PPID1/SID3410506/无TTY）、训练PID3411377已宿主机确认，瞬时显存11796MiB；当前epoch0=第1/20轮，batch20/1749，完整轮次0，best/val/test未知。
+
+实际预检通过：相对R06-ELC有效配置仅prompt_mode organ→species（模板organ of species），89项原源/资产hash和63项原依赖版本/native hash一致；相对R08-LC只改变主文本，保留其旧监控元数据两个hash差异的身份边界。train6998/val999/test2000路径/原GT计数/registry相同，全部caption含3exemplar最长17/16/17tokens且单目标未截断；9个含已解析/未解析taxonomy的样本在同seed下增强图像、全部非文本target与Python/NumPy/Torch RNG完全一致。
+
+实际CPU严格FSC147加载1146共享项，仅新增12项taxonomy状态，unexpected空，无TPC权重/optimizer/scheduler/RNG；log_c参数唯一进原优化器组，有限非零合成梯度.2475481778383255使c1→.9998999834060669。CPU模型丢弃后正式新进程fresh seed42/原FSC147初始化。真实GPU前20批loss有限，最新26.4017，TT/TV存在而contrast缺席，非法锥0；c已更新到日志.9996，确认曲率在学习，不能据此推断计数收益。
+
+启动HEAD92edcb72b986181bdd7c68ca7d74689d77b45466，新配置/文档未提交；run保存launch_sources配置/脚本/依赖元数据快照、manifest源/资产hash、数据配对/CPU初始化/实际进程首批证据。继续20轮→val MAE选best→独立best-val，与R06-ELC原训练流程一致，无自动test。两份docs同步状态，既有代码/配置/数据/标注及其他任务不改。
+
+
+## 2026-10-23 按初始化来源整理结果（实现/协议不变）
+
+用户要求按GroundingDINO与FSC147 CountGD分组整理，experiment.md新增§7.1，列出17个已启动正式run（16完成、R04-ELC训练），并保留R/P文本、名称解析、mask、环境/eval batch和训练预算差异；R09未启动，不冒充实测实验。初始化从各run实际训练参数读取；现有32份val/test均从逐图计数重算MAE/RMSE/R²，并校验999/2000唯一路径等于官方split（代码排除3图）、GT等于原annotation点数、预测非负整数，全通过。缺失单独commit文件的旧run在汇总JSON中记null，不猜测提交。
+
+P04旧主表为10月19日阶段快照，本次从completed.json/30条日志/独立best-val与test的epoch4及逐图计数确认：已于10月20日16:55:13 DONE/退出0，best第5轮，val999=9.821821821821821/25.06903381577472/0.9451221028170154，test2000=12.186/35.250985801818366/0.8099879278313405。仅补齐现存结果，不重跑推理；未在本次重算其历史checkpoint SHA，不添加新的前后SHA声明。R04-ELC 11:46日志第1/20轮/batch280，11:47:36宿主机核实GPU2/PID3411377，完整轮次0、best/val/test仍未知。
+
+匹配初始化对照P02→P03、R08-GD→R08、R08-GD-LC→R08-LC分别同P30轮/固定曲率R30轮/可学习曲率R20轮；换FSC147后test MAE分别降低40.9725%/28.0435%/27.9524%，三组val/test三指标均更好。结论限seed42/既有协议与历史dirty源码/监控元数据身份边界；P01到P03同时变mask不作纯初始化比较，GD30轮与GD-LC20轮不作纯曲率比较，不能跨R/P直接归因。
+
+完整数据快照`runs/tpc268_v3_exclude3/planning/results_by_initialization_20261023.json`保存每项run/实际初始化/状态/轮次/指标/来源路径和核验标志。两份docs同步更新，模型/loss/config、初始化权重、原数据/标注、环境、推理与在训任务均未改；本次只是组织和重新核验已有结果。
+
+
+## 2026-10-23 初始化分组表展示筛选（实现/实验协议不变）
+
+用户要求从分组表过滤仅器官设置，按主计数caption为organ-only、不含species判定：experiment.md §7.1删除展示R05、R06、R06-ELC、P04四行，保留13个含物种文本实验（GD4/FSC147 9，12完成/1在训），器官+物种的R04-ELC保留。原始17个run、完整主表与results_by_initialization_20261023.json保持，另存派生表results_by_initialization_species_text_20261023.json及筛选条件/来源快照；不新增实测指标或刷新未核验进度。
+
+本次仅筛选结果展示，不改变数据集排除名单、原始数据/标注、模型/loss/config、初始化、训练/推理协议或任何任务，不需要新基线。两份docs同日同步记录。
+
+
+## 2026-10-23 蕴涵可学习曲率的趋势诊断与调参建议（仅提案）
+
+本次读取R08/R08-LC/R08-GD/R08-GD-LC完整日志及best/latest权重的c、alpha标量，生成共同前20轮曲线和全轮次CSV/分析JSON，记录于runs/tpc268_v3_exclude3/planning/entailment_tuning_20261023。experiment.md §8.6写明测试改善与val MAE未改善的边界、GD20/30预算不匹配，区分原始损失与lambda/warmup后的loss，以及epoch均值c与best checkpoint实际c；没有训练候选实验。
+
+实际TV迅速接近0，FSC-LC第1→2→12→20轮原始TV约.8417/.002472/.0001717/.00001189，但val MAE10.2302/14.2022/10.2352/12.0240。错误species taxonomy节点→query的no_grad训练包含率亦接近100%，不等于test分类错误率/错误单位负loss或主模型坍塌；当前TV只有正例，单增lambda_tv不直接排斥错误关系。可学习c使20轮混合text/query映射径向触顶率FSC11.7348%→.006647%、GD6.7119%→0，非法锥一直0；c与alpha及投影范数在sqrt(c)*alpha尺度中耦合，不能从末轮c≈.63–.65推断独立最佳曲率。分支梯度范数/裁剪率未记录，不能仅据loss约.004%的标量占比判断梯度弱。
+
+提案LC-T01仅lr1e-4→3e-5、LC-T02仅aux warmup1→3、LC-T03仅lambda_tv.05→.01（TT仍.05），均在FSC147 R08-LC全分类/seed42/20轮同协议fresh初始化上独立比较，不先组合。GD保留自己的lr对照，不默认复制FSC最优；后续lambda_tt{.02,.05,.1}和独立曲率lr倍率{.1,1}为条件提案，后者当前无独立参数组需新实现/匹配基线。固定c初值1/范围[.1,10]及其他几何项，contrast关闭时temperature/lambda_contrast不参与目标，不调无效参数。
+
+仅提出今后记录共享feat_map分支梯度、c/alpha/有效尺度、裁剪、分开text/query触顶与验证包含率等诊断，不在本次加入引擎；TV负蕴涵另属机制消融，不混称单纯调参。按val选择，最终配置固定后测test，已看历史test后提案均为探索性。两份docs同日更新建议；模型/loss/config、数据/标注、环境及在训R04-ELC完全不改，提案状态PROPOSED，未来性能未知。
+
+
+## 2026-10-23 LC-T01学习率配置与后台训练准备
+
+用户指定GPU0执行已建议的第一项调参。新增cfg_tpc268_entailment_learnable_lr3e5.py继承R08-LC，仅设lr=3e-5，run entailment_learnable_lr3e5_seed42_e20；FSC147 model-only fresh初始化、seed42/20轮、R full_taxonomy、TT/TV .05/.05/可学习c初始1/warmup1/无contrast，其余R08-LC设置不变。普通组含log_c/alpha随lr变为3e-5，原特殊linear-projection组仍1e-5；未引入独立曲率组或损失改动。
+
+新本地run_lc_t01_lr3e5_e20.sh固定GPU0（13:16实查空闲），uv离线原解释器/nohup+setsid/flock、防覆盖/隐式resume，启动前核空闲门槛，预检仅lr配置差异、原源/资产/依赖/native/初始化hash与CPU严格FSC147加载及曲率参数/梯度/更新；CPU检查模型不用于正式GPU训练。新配置/脚本语法检查已过，其余真实运行证据/PID/指标待运行后填写。20轮按val MAE选best后独立best-val，不自动test，其他LC-T02/03仅提案。
+
+两份docs同日同步设置/状态；模型/loss/Dataset、旧配置、数据/标注、环境和在训R04-ELC不改。新文件尚未提交，运行以manifest/hash/配置脚本快照识别，不只凭HEAD；本次只授权LC-T01，不同时组合其他候选参数。
+
+### 2026-10-23 LC-T01正式启动核实（13:20）
+
+新run entailment_learnable_lr3e5_seed42_e20于13:19:25进入TRAINING，GPU0启动前used4MiB/free24121MiB。后台PID3507464，PPID1/SID3507464/无TTY，实际训练PID3507881/显存瞬时9296MiB已宿主机核实；当前epoch0=第1/20轮，batch20/1749，完整轮次0，best/val/test未知。
+
+有效配置相对R08-LC仅lr1e-4→3e-5；R06-ELC原89项源/资产hash相同，R08-LC旧77项相同和两个已审计监控元数据差异，63项原依赖实际版本/native hash及初始化SHA均通过。CPU真实FSC147严格加载1146共享项、仅12新taxonomy项、unexpected空；log_c唯一进3e-5普通组，有限非零合成梯度.2475481778383255使c1→.999970018863678。新lr同时作用普通组内curvature/alpha与其他普通参数，特殊linear-projection组保持1e-5，无新增曲率组。
+
+CPU检查模型丢弃，正式新进程fresh seed42/FSC147；首批loss1492.6223与R08-LC首批相同。真实batch20 loss248.9449有限，TT/TV存在、无contrast，lr3e-5、非法锥0；GPU曲率四位日志仍1.0000，不预写非1变化或性能改善。启动HEAD92edcb72b986181bdd7c68ca7d74689d77b45466，新配置/文档未提交，源码身份按快照/hash/diff；run保存manifest/CPU初始化/launch_sources/空闲GPU/实际进程和首批证据。
+
+20轮按val MAE选best后独立best-val，不自动test；调参计划LC-T01改RUNNING，LC-T02/03保留PROPOSED。两份docs同日同步，模型/loss/Dataset/旧配置、数据/标注、环境及GPU2上R04-ELC不改。
+
+
+## 2026-10-25 R04-ELC与LC-T01完成及最佳权重测试记录
+
+按用户要求核实两组各20条完整train+val日志、训练及独立best-val成功退出：R04-ELC于10月24日10:07:25完成，best第14轮，val999=10.162162162162161/30.63426934755354/0.9180521955583507；LC-T01于10月24日13:13:15完成，best第18轮，val999=9.565565565565565/31.256662953344506/0.9146885175455899。此前两组均无test结果。
+
+新增本地测试入口run_r04_entailment_learnable_test.sh、run_lc_t01_lr3e5_test.sh，复用R06-ELC的严格身份/指标检查，只分别设置本run/config/GPU/best epoch/prompt/lr断言。12:53:30在空闲GPU2/0以nohup+setsid启动，PID380027/380028，宿主机核实PPID1/独立SID/无TTY。测试输出各run/test_final，固定val选出的第14/18轮，不从test重选；流程要求训练manifest源/资产一致、依赖/native核验、测试2000张官方路径/原GT/指标重算与checkpoint SHA前后一致。启动时完整test及最终核验未知，未预填指标；现已完成，实测结果见下文。
+
+模型、loss、配置、初始化、数据及标注、训练/推理协议与环境均不改，无新增训练，不启动LC-T02/03；两份docs同日更新，完整结果已同步主表及下文完成记录。
+
+
+### 2026-10-25 最终测试与报告核验完成（实现/协议不变）
+
+R04-ELC完成20轮，最低val MAE选第14轮，best c=0.6370097994804382；val999=10.162162162162161/30.63426934755354/0.9180521955583507，test2000=12.3855/35.432873154741486/0.8080220278659153。DONE 2026-10-25T13:00:21+08:00、exitcode0；权重SHA256=7ef4b6c01d7d8b3f8259b4b47d6fef017f42ba261b7d7ae8fbd804c70591548c，测试前后相同。90份源/资产hash完全匹配该run训练manifest，63项原依赖实际版本和native扩展SHA一致；不声称整个环境逐字节相同。
+
+LC-T01完成20轮，最低val MAE选第18轮，best c=0.7562490701675415；val999=9.565565565565565/31.256662953344506/0.9146885175455899，test2000=9.636/28.857338754639173/0.8726639962191843。DONE 2026-10-25T13:01:00+08:00、exitcode0；权重SHA256=5acbecab9f684aae3047c879761658b9ae9a9c3587efd3655cbcd2430f55361f，测试前后相同。91份源/资产hash完全匹配该run训练manifest，63项原依赖实际版本和native扩展SHA一致；不声称整个环境逐字节相同。
+
+两项test均严格加载最终best，全部2000官方路径唯一、集合相同、GT逐图等于原点标注，三指标由逐图预测独立重算；本次同时重核两项val999与R08-LC/R06-ELC参照结果，配置差异严格只有lr或prompt_mode。LC-T01与R08-LC全split caption逐项相同；R04-ELC主caption是organ+species，没有祖先后缀。结果、配置差异、来源、SHA/提交与核验标志保存planning/r04elc_lct01_results_20261025.json，实验报告主表/初始化筛选表/配对分析同步更新。
+
+降低lr的val MAE改善伴随val RMSE/R²退化，不能称全面提升；具体test相对变化见experiment.md §8.7。结论限既有seed42/20轮配对，不据test重选epoch、阈值或后续参数，不作双曲几何独立因果结论。两份docs同日更新，模型/loss/config、数据及标注、初始化、训练/推理协议与环境均不变，未新增训练或启动LC-T02/03。
+
+13:02:10宿主机复查GPU0/2测试进程已退出；全部四卡used1MiB/free24124MiB，无计算进程。未启动LC-T02/03或其他训练。
+
+
+## 2026-10-25 LC-T01损失趋势诊断与后续调参提案（实现不变）
+
+用户要求结合LC-T01实测结果/损失趋势调整参数。本次只读LC-T01和R08-LC完整20轮日志及已核验best元数据，生成planning/lc_t01_followup_20261025/的CSV/分析JSON/PNG/PDF/提案JSON；原日志SHA保留，曲线区分raw与weighted损失、c的epoch均值和checkpoint标量，不重推test或启动训练。experiment.md新增§8.8，同日同步说明提案与实现边界。
+
+LC-T01前/后10轮val MAE跨轮总体标准差.598194/.186624（原lr1.334904/.568772），第4轮MAE9.56957与最终第18轮9.56557仅差总绝对计数误差4，不能仅因best靠后而增加预算。TV第1/2/4/18/20轮约1.719755/.0772801/.00643081/3.93692e-5/4.46097e-5；前5轮占20轮epoch均值weighted TV标量和99.3477%，不是梯度比例。TV仅正蕴涵，错误taxon包含为detached训练诊断，不能从loss小或包含率近100%直接认定辅助分支梯度太小/太强或主模型坍塌。TT末轮.0427784高于旧lr .0245952而val更好，不强求更小辅助loss。best c=.75624907，20轮径向触顶及非法锥率均0，保持c_init/范围/共享学习形式。
+
+新提案全部以LC-T01为匹配baseline，fresh原FSC147、full_taxonomy/3exemplars/seed42/20轮及原数据/环境/推理不变，分别单改LC-T04 lambda_tv .05→.01（优先）、LC-T05普通lr3e-5→1e-5、LC-T06 aux warmup1→3；不组合，其他TT/TV/lr/warmup保持LC-T01。普通lr包含log_c/alpha，special projection初始lr仍1e-5，不称独立曲率lr消融。原LC-T02/03仍是旧lr1e-4基线上的独立提案，不重新定义；所有新候选PROPOSED_NOT_LAUNCHED，未来指标未知，无新config/launcher/PID。
+
+当前main.py始终StepLR，multi_step_lr/lr_drop_list配置对应分支被注释；lr_drop=5会每5轮反复降，不是第5轮仅降一次。本次只核查并记录，不修改scheduler。新增独立c组、TV负蕴涵或梯度诊断均不在本次实现范围，未来须单独记录实现/匹配基线。两份docs同步，模型/loss/config、数据/标注、初始化、环境、训练/推理协议与既有实测表均不改；提案是在已查看历史test后的探索性建议，后续按val选模型，test不用于继续排序超参。
+
+
+## 2026-10-25 LC-T04/05/06配置与后台入口准备
+
+用户授权将三个LC-T01单因素候选分别放在GPU0/1/2后台训练。新增cfg_tpc268_entailment_learnable_lr3e5_tv001.py、cfg_tpc268_entailment_learnable_lr1e5.py、cfg_tpc268_entailment_learnable_lr3e5_warmup3.py，均继承LC-T01，仅分别覆盖lambda_tv=.01、lr=1e-5、aux_loss_warmup_epochs=3。实际有效配置与LC-T01 manifest比较，各自严格只有上述单项差异；原TT/TV目标实现、共享可学习c初始1/范围[.1,10]、full_taxonomy/3exemplar/seed42/20轮及训练/推理协议均不变。
+
+新增runs本地共用run_lc_followup_e20.sh与lc_followup_precheck.py，固定LC-T04→GPU0、LC-T05→GPU1、LC-T06→GPU2，各自输出/锁/status/stage/日志，防已有产物覆盖和隐式resume，nohup+setsid脱离SSH；uv离线原解释器，无安装/sync。CPU准备核对原LC-T01全部91源/资产hash、63项原依赖/native/初始化SHA、实际严格FSC147 model-only加载与curvature/alpha参数分组/有限梯度/更新；CPU模型丢弃后新GPU进程重新fresh seed42/FSC147训练，GPU分配前再要求空闲，20轮后best-val不自动test。脚本/内嵌Python语法和有效配置检查已过，准备阶段的实际CPU/GPU检查/PID当时待验证；现已通过并训练，见下节，正式性能仍未知。
+
+四卡实查空闲used1MiB/free24124MiB且无计算进程，输出路径未用，主机RAM足以做三个CPU检查。两份docs同日更新矩阵/准备状态/未知指标及旧提案状态；模型/loss/engine/Dataset代码、旧配置、原数据/标注、初始化与依赖环境不改，保留用户已有工作区修改；LC-T02/03继续未启动。
+
+
+### 2026-10-25 LC-T04/05/06实际训练启动核验
+
+LC-T04已进入TRAINING 2026-10-25T16:47:05+08:00，GPU0，后台PID441440/训练PID441913；宿主机核实PPID1/SID441440/无TTY、CUDA_VISIBLE_DEVICES与UUID正确，核验时epoch0=第1/20轮/batch50/1749，完整轮次0；首批loss1492.6222、最近loss89.9213有限，正式best/val/test未知。
+
+LC-T05已进入TRAINING 2026-10-25T16:47:05+08:00，GPU1，后台PID441441/训练PID441890；宿主机核实PPID1/SID441441/无TTY、CUDA_VISIBLE_DEVICES与UUID正确，核验时epoch0=第1/20轮/batch50/1749，完整轮次0；首批loss1492.6223、最近loss162.7807有限，正式best/val/test未知。
+
+LC-T06已进入TRAINING 2026-10-25T16:47:04+08:00，GPU2，后台PID441442/训练PID441823；宿主机核实PPID1/SID441442/无TTY、CUDA_VISIBLE_DEVICES与UUID正确，核验时epoch0=第1/20轮/batch50/1749，完整轮次0；首批loss1492.6222、最近loss83.0297有限，正式best/val/test未知。
+
+三组真实有效配置分别严格只差lambda_tv/lr/aux warmup；LC-T01的91份原源/资产hash全部一致，每run新增完整清单96项，原63项依赖版本/native/FSC147 SHA核验通过。实际CPU共享1146项严格加载、只允许12新taxonomy项、无unexpected；c/alpha唯一普通组，非零有限合成c梯度.2475481778383255，各自正确lr使c更新，CPU模型不用于正式训练。正式GPU进程fresh seed42/FSC147、resume空，实际config_args_all匹配manifest、首批主CE/box/xy与LC-T01在打印精度内一致，首批TT/TV权重匹配各自lambda和warmup；GPUc日志仍四位1.0000，不填未知c/性能。
+
+LC-T06只延长TT/TV权重warmup（前三轮末1/3、2/3、1），不改LR日程；LC-T05 c/alpha随普通组1e-5，特殊projection初始1e-5不变。三项20轮/最低val MAE选best/独立best-val，无自动test；各自锁防重复，nohup+setsid独立session脱离SSH。HEAD92edcb72b986181bdd7c68ca7d74689d77b45466，新配置未提交；launch_sources/hash/diff/manifest/launch_verified保存实际源与运行身份，证据汇总planning/lc_t01_followup_20261025/launch_verified_20261025.json。
+
+两份docs同日同步矩阵/状态/未知结果及启动命令，三项计划由提案改RUNNING，LC-T02/03保持未启动；既有模型/loss/engine/Dataset、旧配置、原数据及标注、初始化与环境均不改。
+
+
+## 2026-10-25 BunchCount 标注核查与计划约束（未训练）
+
+本次仅审计 BunchCount、生成可视化并按用户要求修正一处 exemplar；TPC-268 模型、配置、训练/推理协议和已有运行未改。`data/bunchcount-dataset-0928/annotations.json` 中 `690-pencils.individual_exemplars` 原有4个，仅删除最后一个，现为3个；逐记录深比较确认只有该字段变化，其余全部一致。删除框为 `[28.643259048461914,62.03076934814453,390.4894104003906,628.0615234375]`。原标注备份、前后SHA256及机器可读审计保存在 `runs/bunchcount_audit_20261025/annotations.before.json` 与 `audit.json`。
+
+按显式 `bbox_to_points` 检出185个单成员群体，涉及52张图；群体数按train/val/test为32/3/150。这些为用户指出的错误标注，暂仅列清单和可视化，未删除框、关系、个体点或修改群体exemplar，等待用户决定修正方式。逐群体0-based框/点索引、坐标和split见 `singleton_groups.csv/json`；`index.html` 汇总逐图标注及185个局部放大图，另有4张contact sheet。灰框为其他群体、青点为所有个体、红框和黄圈为单成员群体与其唯一成员。
+
+缺失group_description的3张图全部属于train：`coco-trains-000000115118.jpg`、`coco-trains-000000419882.jpg`、`openimages-trains-0001.jpg`；清单见 `missing_group_description.json`，可视化亦已纳入index，字段保持原样，由用户决定处理方法。
+
+用户明确收紧后续BunchCount计划：保留共享900 queries，使用FSC147 CountGD预训练权重；训练GT>900不排除、不截断、不调整query容量或引入特殊采样/分块，保持全部GT及原始计数。联合目标可能超过900，标准一对一匹配只能匹配至多900个query，未匹配GT不能冒称全部接受了匹配监督；评估仍使用完整GT。群体和个体分别报告MAE/RMSE，禁止合并成一个计数指标。此前1024-query建议撤回。未来数据协议对照需使用相同修正版标注、prompt/exemplar/初始化/增强和推理策略；旧标注实验不可直接混为相同协议。
+
+后续权重选择建议（仅提案，未实施）：保留群体最佳、个体最佳和一个预先约定规则的联合选择checkpoint；联合规则使用两个val MAE各除以固定、相同数据协议的预先指定共享检测baseline的val MAE后等权平均，分母在候选方法比较前固定，并设正epsilon处理零值。此分数仅用于选择同一个模型权重，不作为合并计数性能汇报；不接受加权规则时保留Pareto候选，由用户确定取舍，不能声称存在唯一双任务最优。两个RMSE单独报告，可作预定平局规则，不把四项随意加权。不使用test选择规则或权重。
+
+关系评估建议（仅提案）：先按类型分别一对一匹配群体框和个体点，不使用预测关系参与节点匹配；框采用预先约定IoU阈值，点采用原图坐标下固定容差及敏感性报告。端到端边precision/recall/F1需计入节点漏检/误检导致的FN/FP；另报两端均匹配子集的关系指标和覆盖率、父群体含null准确率及独立个体precision/recall/F1。关系阈值/点容差仅按训练定义或val确定，固定后test；null不计为群体实体。完整成员集合准确率和成员数误差作为补充，不能由计数一致推断关系正确。
+
+本次没有新增训练或评估模型；BunchCount run ID、训练commit、服务器状态和性能均未知，以上清单数目来自本地实际标注审计，非模型实测性能。

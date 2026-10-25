@@ -1,10 +1,10 @@
 # CountGD / TPC-268 阶段实验报告与后续计划
 
-**报告更新：2026-10-22，Asia/Shanghai；R08-GD-LC已完成20轮、best-val及完整test，14:07:58退出0，第12轮best，结果见主表和末节。** R08-GD的完整测试已于今日09:52核验通过；R06/R08-LC测试记录至10月21日11:55。R06-ELC保留今日13:56只读快照（完成17轮，仍训练），本次不重报其他任务当前进度；P04仍保留10月19日15:51历史快照，本次未重查。实现细节见 [implement.md](implement.md)。
+**报告更新：2026-10-25，Asia/Shanghai；LC-T04/05/06已在GPU0/1/2分别后台训练20轮，启动核验时均第1轮/batch50，尚无完整val/test。** R04-ELC及LC-T01最终val/test已补齐，见§5–8；三项新实验设置/启动证据见§8.8及末节。
 
 **2026-10-22补记：R08-GD已完成30轮、best-val及完整test核验，最佳第25轮；test=19.0240/49.7241/0.6219（MAE/RMSE/R²），详见末节。**
 
-实验根目录：`runs/tpc268_v3_exclude3/`。当前代码HEAD=`6341592d13575f3626bc70f08604b96ab231f4ef`，存在文档、R08可学习曲率新配置及GroundingDINO初始化专用入口的工作区修改；**当前HEAD不等于每个实验启动时的代码版本**，详见第9节。所有指标来自实际日志、最佳checkpoint元数据或计数JSON；没有结果的单元格用“—”，不填推测值。
+实验根目录：`runs/tpc268_v3_exclude3/`。本次评估实查当前HEAD=`92edcb72b986181bdd7c68ca7d74689d77b45466`，工作区存在未提交修改；**当前HEAD不等于每个实验启动时的源码身份**。R06-ELC训练HEAD=6341592，评估HEAD=92edcb7，但训练清单89项源/资产hash完全一致，详见末节。所有指标来自实际日志、最佳checkpoint元数据或计数JSON；没有结果的单元格用“—”，不填推测值。
 
 ## 1. 当前结论摘要
 
@@ -16,7 +16,7 @@
 - **R08 TT/TV-only未显示整体计数收益。** 最终第12轮best：val=9.9880/29.5085/0.9240，test=13.6890/37.2070/0.7883。相对R01，val MAE仅降0.1501%、RMSE升11.4547%；test MAE升8.2220%、RMSE升1.5384%、R²下降0.0064，测试三指标退化。
 - **P02仅修复mask没有带来全面改善。** 第14轮best：val=10.8949/31.2740/0.9146，test=19.2080/51.6365/0.5923；对照P01的test=19.4665/50.4593/0.6107，MAE降1.3279%，RMSE升2.3330%，无法解释与R01的全部差距。
 - **P03初始化来源对照显示明显收益。** 完成30轮，第5轮best：val=10.4855/28.1765/0.9307，test=11.3380/35.4983/0.8073。仅相对P02由GroundingDINO换为FSC147 CountGD初始化，val三指标改善，test MAE降低40.9725%、RMSE降低31.2536%、R²增加0.2150；结论限于当前固定P协议/seed42及修复mask条件。
-- P04保留10月19日15:51快照：GPU2完成4/30、正在第5轮；输入仅`{organ}.`，与P03配对仅主caption不同，阶段性best第2轮val=10.7938/32.3066/0.9089；本次未重查P04，不把旧进度当作当前进度。
+- **P04最终结果已补齐。** 30轮、10月20日16:55:13正常完成，最佳第5轮；器官文本`{organ}.`，val=9.8218/25.0690/0.9451，test=12.1860/35.2510/0.8100。相对P03，val三指标较好，test MAE较差而RMSE/R²略好，不能声称器官文本全面改善。
 - **尚不能判定双曲几何无效。** R07没有TT/TV；R08最终test三指标退化，R09欧氏匹配对照未做。P01同时改变初始化、caption、原mask与环境，不能单独归因任何一项，也不能声称已复现论文最终性能。R06及R08-LC均已完成20轮及best-val/test；R09保留原门槛；不根据已查看test临时调参数或选择测试集最佳epoch。
 
 - **10月21日新增：R06未显示organ完整辅助方案的测试收益。** 第5轮best，test=10.7340/30.7243/0.8557，相对R05 MAE增加1.7730%、RMSE增加2.8582%；val MAE略差，val RMSE/R²较好，不能用验证集局部改善代替测试收益。
@@ -25,6 +25,12 @@
 - **10月22日新增：R08-GD的初始化来源对照未显示收益。** 第25轮best，val=10.5656/33.0084/0.9049，test=19.0240/49.7241/0.6219。相对同30轮固定曲率R08，val三指标退化，test MAE增加38.9729%、RMSE增加33.6418%、R²下降0.1663863；当前单seed下FSC147 CountGD初始化更好。这不是双曲与欧氏几何的配对实验，不能据此归因几何本身；旧R08源码归档及监控依赖元数据差异的边界保留。
 
 - **10月22日新增：R08-GD-LC完成并补齐test。** 第12轮best，c=0.63181096，val=10.8919/31.3099/0.9144，test=15.4620/42.5036/0.7238。相对同20轮的R08-LC仅初始化不同，val三指标均较差，test MAE增加38.7971%、RMSE增加29.3285%、R²下降0.1110834；当前单seed仍支持FSC147 CountGD初始化。GD-LC与GD30轮test的差异混有预算/权重选择范围变化，不能当作曲率单因素结论；固定GD前20轮参照仅核到val，尚无对应test。
+
+- **10月23日新增：R06-ELC未显示器官文本下的测试收益。** 最终best更新为第18轮，c=0.62728363，val=10.1862/32.9836/0.9050，test=11.2675/31.1812/0.8513。相对R05，val MAE降低2.7709%，但val RMSE/R²及test三指标较差，test MAE增加6.8313%；相对同20轮R06，test MAE增加4.9702%、RMSE增加1.4869%。当前“关闭contrast+学习曲率”的组合未改善测试表现，不能单独归因其中一个开关。对同20轮R08-LC（仅主文本不同），test MAE高1.1445%，RMSE低5.1228%，属于指标取舍。
+
+- **10月25日新增：R04-ELC与LC-T01均完成并补齐test。** 最佳第14/18轮，val分别10.1622 / 30.6343 / 0.9181、9.5656 / 31.2567 / 0.9147；test分别12.3855 / 35.4329 / 0.8080、9.6360 / 28.8573 / 0.8727。LC-T01降低lr使val MAE改善6.50%，但val RMSE退化9.19%；test配对结论见§8.7，保留指标取舍与单seed边界。
+
+- **10月25日启动：LC-T04/05/06分别在GPU0/1/2运行。** 以LC-T01为匹配基线，只分别改lambda_tv=.01、普通lr=1e-5、aux warmup=3；其他设置/seed42/20轮相同。正式首批loss及GPU分配已核验，目前完整轮次0，best/val/test未知。
 
 ## 2. 模型结构与训练目标有什么修改
 
@@ -66,7 +72,7 @@ L_total = L_CountGD + w(step) * [0.1 L_contrast + 0.05 L_TT + 0.05 L_TV]
 | 模式 | 主caption模板 | 使用实验 |
 |---|---|---|
 | `full_taxonomy` | `{organ} of {species}; taxonomy: {Kingdom}, {Phylum}, {Class}, {Order}, {Family}, {Genus}, {Species} .` | R01/R02/R07/R08，条件式R09 |
-| `species` | `{organ} of {species} .` | R03/R04 |
+| `species` | `{organ} of {species} .` | R03/R04/R04-ELC |
 | `organ` | `{organ} .` | R05、R06、R06-ELC |
 
 从当前registry实际生成的同一物种示例：
@@ -89,12 +95,17 @@ fruit .
 | R02 | full_taxonomy | contrast + Lorentz TT/TV | `cfg_tpc268_full.py` | R01 |
 | R03 | species | 无 | `cfg_tpc268_species.py` | 自身 |
 | R04 | species | contrast + Lorentz TT/TV | `cfg_tpc268_species_full.py` | R03 |
+| R04-ELC | species（器官+物种名） | 仅Lorentz TT/TV .05/.05，可学习c；contrast关闭 | `cfg_tpc268_species_entailment_learnable.py` | R06-ELC（仅增加主文本中的物种名）；R08-LC（去掉主文本祖先链） |
 | R05 | organ | 无 | `cfg_tpc268_organ_baseline.py` | 自身 |
 | R06 | organ | contrast + Lorentz TT/TV | `cfg_tpc268_organ_full.py` | R05 |
 | R06-ELC | organ | 仅Lorentz TT/TV .05/.05，可学习c；contrast关闭 | `cfg_tpc268_organ_entailment_learnable.py` | R06（两开关组合对照）；R08-LC（主文本对照）；R05基线 |
 | R07 | full_taxonomy | contrast-only，权重0.1 | `cfg_tpc268_contrast.py` | R01 |
 | R08 | full_taxonomy | Lorentz TT/TV-only，权重0.05/0.05，固定c=1 | `cfg_tpc268_entailment.py` | R01 |
 | R08-LC | full_taxonomy | 同R08，TT/TV共享可学习c，初始1 | `cfg_tpc268_entailment_learnable.py` | 固定曲率R08前20轮 |
+| LC-T01 | full_taxonomy | 同R08-LC，仅lr=3e-5 | `cfg_tpc268_entailment_learnable_lr3e5.py` | R08-LC（仅普通参数组学习率变化，20轮） |
+| LC-T04 | full_taxonomy | Lorentz TT/TV，可学习c；仅lambda_tv=.01；lr3e-5/TT.05/warmup1 | `cfg_tpc268_entailment_learnable_lr3e5_tv001.py` | LC-T01（同seed42/20轮，仅单项变化） |
+| LC-T05 | full_taxonomy | Lorentz TT/TV，可学习c；仅普通lr=1e-5；TT/TV .05/.05/warmup1 | `cfg_tpc268_entailment_learnable_lr1e5.py` | LC-T01（同seed42/20轮，仅单项变化） |
+| LC-T06 | full_taxonomy | Lorentz TT/TV，可学习c；仅aux warmup=3；lr3e-5/TT/TV .05/.05 | `cfg_tpc268_entailment_learnable_lr3e5_warmup3.py` | LC-T01（同seed42/20轮，仅单项变化） |
 | R08-GD | full_taxonomy | 同R08固定c=1的TT/TV；改用GroundingDINO Swin-B初始化 | `cfg_tpc268_entailment.py`，专用初始化入口 | R08（30轮初始化来源对照） |
 | R08-GD-LC | full_taxonomy | GroundingDINO初始化，可学习c，仅TT/TV .05/.05 | `cfg_tpc268_entailment_learnable.py`，独立入口 | R08-LC（同20轮，初始化对照）；R08-GD前20轮（曲率对照） |
 | R09 | full_taxonomy | contrast + Euclidean TT/TV | `cfg_tpc268_euclidean.py` | R01；几何配对R02 |
@@ -103,7 +114,7 @@ fruit .
 |---|---|
 | 初始化 | R系列默认独立从`checkpoints/checkpoint_fsc147_best.pth`开始；R08-GD及R08-GD-LC例外，使用原始GroundingDINO Swin-B；不从其他TPC微调权重初始化 |
 | 语言权重 | `checkpoints/bert-base-uncased` |
-| 随机种子 / 预算 | seed42，单GPU，默认30epochs；R06、R06-ELC、R08-LC及R08-GD-LC按用户要求20epochs，FP32，不启用AMP |
+| 随机种子 / 预算 | seed42，单GPU，默认30epochs；R06、R06-ELC、R04-ELC、R08-LC、R08-GD-LC及LC-T01/04/05/06按用户要求20epochs，FP32，不启用AMP |
 | batch / steps | train batch4、drop_last；每完整epoch1749个训练batch；eval实际batch1 |
 | 优化 | AdamW；基础LR1e-4、weight decay1e-4、clip0.1；StepLR每10epoch衰减 |
 | 冻结 | `backbone.0`和`bert`；900queries，DN实际为0 |
@@ -137,7 +148,7 @@ P01/P02/P03均用纯官方七级逗号caption、无链species回退；P04仅相�
 
 ## 5. 实验状态与最佳权重轮次
 
-本节及主表轮次均为**1-based**，原始日志/checkpoint的epoch从0起。完整轮数只统计训练和整轮val都完成的日志；R08/P02已核对30条完整训练+val日志、成功退出状态及最佳权重；P03已核对完整30轮、best checkpoint、成功退出及val/test产物；P04进度标注为10月19日15:51历史快照。
+本节及主表轮次均为**1-based**，原始日志/checkpoint的epoch从0起。完整轮数只统计训练和整轮val都完成的日志；R08/P02已核对30条完整训练+val日志、成功退出状态及最佳权重；P03已核对完整30轮、best checkpoint、成功退出及val/test产物；P04本次重核完成30轮、最佳第5轮及独立best-val/test，历史段落保留其原日期。
 
 | ID | 训练GPU | 状态 | 完整预算与进度 | 最佳权重轮次 |
 |---|---:|---|---|---|
@@ -151,12 +162,17 @@ P01/P02/P03均用纯官方七级逗号caption、无链species回退；P04仅相�
 | P01 | 3（已释放） | DONE | 30/30，best-val及test完成，10月18日19:43:01正常退出 | 2 |
 | P02 | 2（已释放） | DONE | 30/30，best-val及test完成；10月19日06:07:41退出0 | 14 |
 | P03 | 3（已释放） | DONE | 30/30，best-val及test完成；10月20日03:17:34退出0 | 5 |
-| P04 | 2 | RUNNING（历史快照） | 10月19日15:51完成4/30、正在第5轮；本次未重查最新进度 | 2（截至旧快照） |
+| P04 | 2（原训练设备；已结束） | DONE | 30/30、best-val及test完成；10月20日16:55:13退出0，本次重核 | 5 |
 | R06 | 3（测试已结束） | DONE | 20/20，best-val及test完成；10月21日11:55:28退出0 | 5 |
 | R08-LC | 1（测试已结束） | DONE | 20/20，best-val及test完成；10月21日11:55:52退出0 | 1 |
 | R08-GD | 2（已释放） | DONE | 30/30、best-val及完整test完成；10月22日09:52核验通过；后处理检查修正见末节 | 25 |
 | R08-GD-LC | 1（测试进程已释放） | DONE | 20/20、best-val及完整test完成；10月22日14:07:58退出0；best c=0.63181096 | 12 |
-| R06-ELC | 3 | RUNNING（10月21日17:32核实） | 第1/20轮，batch20/1749，完整轮次0；仅TT/TV、可学习c | — |
+| R06-ELC | 3（已释放） | DONE | 20/20、best-val及完整test完成；10月23日10:58:57退出0；best c=0.62728363 | 18 |
+| R04-ELC | 2（已释放） | DONE | 20/20、best-val及test完成；DONE 2026-10-25T13:00:21+08:00，退出0；best c=0.63700980 | 14 |
+| LC-T01 | 0（已释放） | DONE | 20/20、best-val及test完成；DONE 2026-10-25T13:01:00+08:00，退出0；best c=0.75624907 | 18 |
+| LC-T04 | 0 | RUNNING（10月25日启动核验） | 第1/20轮，batch50/1749，完整轮次0；独立后台训练 | — |
+| LC-T05 | 1 | RUNNING（10月25日启动核验） | 第1/20轮，batch50/1749，完整轮次0；独立后台训练 | — |
+| LC-T06 | 2 | RUNNING（10月25日启动核验） | 第1/20轮，batch50/1749，完整轮次0；独立后台训练 | — |
 | R09 | — | BLOCKED | 尚未启动，门槛保留 | — |
 
 R07最终test于2026-10-17 22:36:54结束；第1轮旧test另列为历史快照，不替换第16轮最终结果。
@@ -177,12 +193,17 @@ R07最终test于2026-10-17 22:36:54结束；第1轮旧test另列为历史快照�
 | P01 | 2 | 999 | 10.9339 | 26.8876 | 0.9369 | 最终best独立重评完成 |
 | P02 | 14 | 999 | 10.8949 | 31.2740 | 0.9146 | 最终best独立重评；逐图重算与checkpoint核对通过 |
 | P03 | 5 | 999 | 10.4855 | 28.1765 | 0.9307 | 最终best独立重评；checkpoint/逐图重算核验通过 |
-| P04 | 2 | 999 | 10.7938 | 32.3066 | 0.9089 | 阶段性best，正式日志与best_val_metrics.json一致，未完成30轮 |
+| P04 | 5 | 999 | 9.8218 | 25.0690 | 0.9451 | 最终best独立重评；日志/完成元数据/逐图重算一致 |
 | R08-LC | 1 | 999 | 10.2302 | 28.6251 | 0.9284 | 20轮完成，best权重独立重评完成 |
 | R08-GD | 25 | 999 | 10.5656 | 33.0084 | 0.9049 | 30轮完成；最佳权重独立重评，与逐轮日志一致 |
 | R06 | 5 | 999 | 10.6406 | 26.0450 | 0.9408 | 20轮完成，best权重独立重评完成 |
 | R08-GD-LC | 12 | 999 | 10.8919 | 31.3099 | 0.9144 | 20轮完成，独立best-val与完整训练日志一致 |
-| R06-ELC | — | — | — | — | — | 已启动20轮，无完整val/test |
+| R06-ELC | 18 | 999 | 10.1862 | 32.9836 | 0.9050 | 20轮完成，独立best-val与逐轮日志一致 |
+| R04-ELC | 14 | 999 | 10.1622 | 30.6343 | 0.9181 | 20轮完成；独立best-val、checkpoint/日志及逐图重算一致 |
+| LC-T01 | 18 | 999 | 9.5656 | 31.2567 | 0.9147 | 20轮完成；独立best-val、checkpoint/日志及逐图重算一致 |
+| LC-T04 | — | — | — | — | — | 正式训练中，完整轮次0，尚无完整val |
+| LC-T05 | — | — | — | — | — | 正式训练中，完整轮次0，尚无完整val |
+| LC-T06 | — | — | — | — | — | 正式训练中，完整轮次0，尚无完整val |
 | R09 | — | — | — | — | — | 尚未训练，无性能 |
 
 R01–R05的训练best日志、checkpoint的epoch/best_val_mae与独立重评一致；R04/R05最终999张best-val逐图MAE/RMSE/R²已重新计算核验。R07短程约15步技术检查不能混入正式实验表；当前best来自正式第16轮。
@@ -210,7 +231,14 @@ R01–R05的训练best日志、checkpoint的epoch/best_val_mae与独立重评一
 | R08-LC | 1 | 2000 | 11.1400 | 32.8648 | 0.8348 | DONE，退出0；完整集合/GT/指标/权重SHA核验通过 |
 | R08-GD | 25 | 2000 | 19.0240 | 49.7241 | 0.6219 | DONE；完整路径/GT/独立指标/权重SHA核验通过；修正核验脚本后完成 |
 | R08-GD-LC | 12 | 2000 | 15.4620 | 42.5036 | 0.7238 | DONE，退出0；完整路径/GT/重算指标/权重SHA核验通过 |
-| R06-ELC/R09/P04 | — | — | — | — | — | 尚无本报告已核验的test |
+| R06-ELC | 18 | 2000 | 11.2675 | 31.1812 | 0.8513 | DONE，退出0；完整路径/GT/重算指标/权重SHA核验通过 |
+| R04-ELC | 14 | 2000 | 12.3855 | 35.4329 | 0.8080 | DONE，退出0；官方集合/GT/指标重算/权重SHA核验通过 |
+| LC-T01 | 18 | 2000 | 9.6360 | 28.8573 | 0.8727 | DONE，退出0；官方集合/GT/指标重算/权重SHA核验通过 |
+| LC-T04 | — | — | — | — | — | 正式训练中，无test |
+| LC-T05 | — | — | — | — | — | 正式训练中，无test |
+| LC-T06 | — | — | — | — | — | 正式训练中，无test |
+| P04 | 5 | 2000 | 12.1860 | 35.2510 | 0.8100 | DONE；官方集合/GT/逐图指标重算通过 |
+| R09 | — | — | — | — | — | 未启动，无test |
 
 R01/R02/R03共六份val/test结果已从逐图计数JSON独立重算MAE、RMSE、R²，与metrics文件一致，无重复图片；此前test核验图片集合与官方test一致、GT等于原annotation点数。
 
@@ -219,6 +247,7 @@ R01/R02/R03共六份val/test结果已从逐图计数JSON独立重算MAE、RMSE�
 | R01 | 0 | 2026-10-15 18:59:54–19:07:20 | 0 | 完整2000图 |
 | R06 | 3 | 2026-10-21 11:48:35–11:55:28 | 0 | 第5轮best，完整2000图及核验 |
 | R08-LC | 1 | 2026-10-21 11:48:35–11:55:52 | 0 | 第1轮best，完整2000图及核验 |
+| R06-ELC | 3 | 2026-10-23 10:52:28–10:58:57 | 0 | 第18轮best，完整2000图；实际推理约6分07秒 |
 | R08-GD-LC | 1 | 2026-10-22 13:58:28–14:07:58 | 0 | 第12轮best，完整2000图；共享GPU，实际推理约9分07秒 |
 | R08-GD | 2 | 2026-10-22 09:44:05–09:51:24推理；09:52:23修正核验通过 | 推理0；初次后处理1，修正核验0 | 第25轮best，完整2000图；未重跑推理，原失败状态保留 |
 | R02 | 1 | 2026-10-16 10:29:53–10:40:55 | 0 | 与其他任务共享GPU，峰值显存1584MiB |
@@ -234,6 +263,55 @@ R01/R02/R03共六份val/test结果已从逐图计数JSON独立重算MAE、RMSE�
 2026-10-16阶段性test：按用户明确要求，15:40:32在GPU3/0/2并行评估R04/R05/R07当时val选出的best（第11/12/1轮），训练继续运行。启动前GPU剩余显存约12.7/6.9/7.2GiB（GPU0/2/3），此前同协议eval峰值约1.6GiB。每项输出单独保存为`<run>/test_snapshot_20261016_153930/`；使用复制并读取验证过的`checkpoint_best_snapshot.pth`，保存SHA256、快照时间/epoch/val指标、config及工作区代码diff，避免训练刷新best改变评估对象。后台进程使用独立session，日志/status/exitcode留在输出目录，不依赖SSH。清单见[parallel_test_snapshot_20261016_153930.json](../runs/tpc268_v3_exclude3/planning/parallel_test_snapshot_20261016_153930.json)。这些结果属于当前部分训练预算的快照，不替代最终30轮模型；不使用test挑epoch、阈值或后续参数。推理沿用原caption、3exemplars、整图、阈值0.23/0及2000张test；仅设置CPU线程数为2以控制并行资源占用。
 
 15:53核验通过：三个快照的SHA256未改变；逐图路径各有2000张且唯一，与官方test清单一致；每张GT与原annotation点数一致；MAE/RMSE/R²均独立重算吻合。核验及配对结果见[verified_test_snapshot_20261016_153930.json](../runs/tpc268_v3_exclude3/planning/verified_test_snapshot_20261016_153930.json)。PyTorch峰值allocated为R04/R05/R07=1584/1583/1584MiB，nvidia-smi进程占用约3004MiB，各卡仍有余量；完成后测试进程释放显存，原GPU0/2/3训练进程仍在。没有修改正在运行的训练配置或数据。
+
+### 7.1 按初始化来源整理：保留物种文本的实验（2026-10-25）
+
+展示筛选按**主计数文本**判断：排除仅含器官词、不含物种名的R05、R06、R06-ELC、P04，保留“器官+物种名”与全分类文本设置。当前展示17个实验（GroundingDINO 4个、FSC147 CountGD 13个），原14个已完成训练、best-val及test；新LC-T04/05/06已在GPU0/1/2分别训练（第1/20轮，完整轮次0，best/val/test未知）。R04-ELC与LC-T01状态/指标在10月25日从实际产物独立重核并补测，其余行沿用10月23日已核验快照。完整21个已启动实验（含四个organ-only）保留在前面主表；历史汇总JSON保持原时点，新两项与匹配对照的核验见planning/r04elc_lct01_results_20261025.json。
+
+表中指标依次为**MAE / RMSE / R²**；“预算/最佳轮”均为1-based，最佳轮按val MAE选择，test使用相应固定权重。未完成的新run保留空值；R09未启动，不作为实测实验纳入初始化分组。
+
+**R/P协议需区分**：R完整文本为`{organ} of {species}; taxonomy: ... .`，species模式为`{organ} of {species} .`，organ为`{organ} .`；P完整文本为官方七级名称逗号串、缺链只用species，P04为`{organ}.`。P与R还存在名称解析规则、依赖环境及eval batch等差异，分到同一初始化组不代表能直接单因素比较。所有组均seed42/3视觉exemplar、同3图代码排除，val999/test2000；不根据test选择权重。
+
+**GroundingDINO 初始化**
+
+| 实验 | 主文本 | 辅助损失/曲率 | 预算/最佳轮 | 验证 MAE / RMSE / R² | 测试 MAE / RMSE / R² |
+|---|---|---|---:|---|---|
+| P01 | 官方七级文本（P） | 无；原all-True mask | 30/2 | 10.9339 / 26.8876 / 0.9369 | 19.4665 / 50.4593 / 0.6107 |
+| P02 | 官方七级文本（P） | 无；修复mask | 30/14 | 10.8949 / 31.2740 / 0.9146 | 19.2080 / 51.6365 / 0.5923 |
+| R08-GD | 器官+物种+分类链（R） | TT/TV，固定c | 30/25 | 10.5656 / 33.0084 / 0.9049 | 19.0240 / 49.7241 / 0.6219 |
+| R08-GD-LC | 器官+物种+分类链（R） | TT/TV，可学习c | 20/12 | 10.8919 / 31.3099 / 0.9144 | 15.4620 / 42.5036 / 0.7238 |
+
+**FSC147 CountGD 初始化**
+
+| 实验 | 主文本 | 辅助损失/曲率 | 预算/最佳轮 | 验证 MAE / RMSE / R² | 测试 MAE / RMSE / R² |
+|---|---|---|---:|---|---|
+| R01 | 器官+物种+分类链（R） | 无 | 30/2 | 10.0030 / 26.4758 / 0.9388 | 12.6490 / 36.6432 / 0.7947 |
+| R02 | 器官+物种+分类链（R） | 对比+TT/TV，固定c | 30/3 | 10.6867 / 29.0248 / 0.9264 | 12.3755 / 37.9426 / 0.7799 |
+| R03 | 器官+物种（R） | 无 | 30/12 | 9.6707 / 28.6010 / 0.9286 | 12.5750 / 37.7194 / 0.7824 |
+| R04 | 器官+物种（R） | 对比+TT/TV，固定c | 30/11 | 10.7818 / 32.4995 / 0.9078 | 13.6800 / 36.0976 / 0.8008 |
+| R07 | 器官+物种+分类链（R） | 仅对比 | 30/16 | 11.0701 / 36.0906 / 0.8863 | 18.3190 / 48.8021 / 0.6358 |
+| R08 | 器官+物种+分类链（R） | TT/TV，固定c | 30/12 | 9.9880 / 29.5085 / 0.9240 | 13.6890 / 37.2070 / 0.7883 |
+| R08-LC | 器官+物种+分类链（R） | TT/TV，可学习c | 20/1 | 10.2302 / 28.6251 / 0.9284 | 11.1400 / 32.8648 / 0.8348 |
+| LC-T01 | 器官+物种+分类链（R） | TT/TV，可学习c；lr3e-5 | 20/18 | 9.5656 / 31.2567 / 0.9147 | 9.6360 / 28.8573 / 0.8727 |
+| LC-T04 | 器官+物种+分类链（R） | TT/TV，可学习c；仅lambda_tv=.01；lr3e-5/TT.05/warmup1 | 20/—（训练中） | — | — |
+| LC-T05 | 器官+物种+分类链（R） | TT/TV，可学习c；仅普通lr=1e-5；TT/TV .05/.05/warmup1 | 20/—（训练中） | — | — |
+| LC-T06 | 器官+物种+分类链（R） | TT/TV，可学习c；仅aux warmup=3；lr3e-5/TT/TV .05/.05 | 20/—（训练中） | — | — |
+| R04-ELC | 器官+物种（R） | TT/TV，可学习c | 20/14 | 10.1622 / 30.6343 / 0.9181 | 12.3855 / 35.4329 / 0.8080 |
+| P03 | 官方七级文本（P） | 无 | 30/5 | 10.4855 / 28.1765 / 0.9307 | 11.3380 / 35.4983 / 0.8073 |
+
+**只比较匹配设置的初始化对照**（箭头为GroundingDINO→FSC147 CountGD）：
+
+| 配对 | 协议与预算 | test MAE变化 | test RMSE变化 | test R²变化 |
+|---|---|---:|---:|---:|
+| P02 → P03 | P、修复mask、无辅助、30轮 | 19.2080 → 11.3380（-40.97%） | 51.6365 → 35.4983（-31.25%） | 0.5923 → 0.8073 |
+| R08-GD → R08 | R、TT/TV固定c、30轮 | 19.0240 → 13.6890（-28.04%） | 49.7241 → 37.2070（-25.17%） | 0.6219 → 0.7883 |
+| R08-GD-LC → R08-LC | R、TT/TV可学习c、20轮 | 15.4620 → 11.1400（-27.95%） | 42.5036 → 32.8648（-22.68%） | 0.7238 → 0.8348 |
+
+三组配对中FSC147 CountGD初始化的val/test三指标均较好，当前seed42结果支持其作为TPC微调起点；不扩大为任意任务/随机种子上的结论，保留旧run dirty源码归档及监控元数据差异的可重建性边界。P01与P03同时改mask和初始化，不作为纯初始化对照；GD30轮与GD-LC20轮不作为纯曲率对照。当前展示的FSC147初始化R系列实验中，LC-T01的test MAE最低（9.6360）；这只是筛选后不同文本/损失/预算结果的描述性排序，不推出单因素因果结论。
+
+筛选后的机器可读表：`runs/tpc268_v3_exclude3/planning/results_by_initialization_species_text_20261023.json`；完整汇总与证据路径仍为`runs/tpc268_v3_exclude3/planning/results_by_initialization_20261023.json`。10月23日汇总快照保持；10月25日补测上述两组并更新文档，不改变初始化、数据/标注、模型/loss/config或训练任务。
+
+R04-ELC与LC-T01新增实测依据各run的20轮日志、独立best-val、test_final/checkpoint_metadata.json与verified.json；原10月23日分组JSON保留历史快照，不覆盖历史结果。10月25日两项及匹配对照详见新汇总JSON；未在本次重新推理其余实验。
 
 ## 8. 实验结果分析
 
@@ -310,6 +388,117 @@ P03与P02模型/数据/文本/配置/环境/修复mask一致，仅把GroundingDI
 
 原始逐轮点、无平滑或补点，星号为各run最低val MAE。这张曲线为2026-10-17历史快照，不包含10月18新增轮次/P02；最新状态以第5–7节、[2026-10-19 11:03核验快照](../runs/tpc268_v3_exclude3/planning/results_verified_20261019.json)及其后完成的[R08最终test核验](../runs/tpc268_v3_exclude3/entailment_seed42/test_final/verified.json)、[P03最终test核验](../runs/tpc268_p03_fsc147_init_20261018/test/verified.json)为准。P01单列，避免与R01协议混淆。核验产物：[最终配对](../runs/tpc268_v3_exclude3/planning/test_full_taxonomy_final_20261017.json)、[R07逐图/分组核验](../runs/tpc268_v3_exclude3/planning/r07_final_test_verified_20261017.json)、[状态快照](../runs/tpc268_v3_exclude3/planning/report_results_verified_20261017.json)。
 
+### 8.6 TT/TV可学习曲率的损失趋势与调参建议（2026-10-23，PROPOSED，未启动）
+
+**后续状态：用户授权的LC-T01已于13:19:25在GPU0正式训练，最新核实见末节。LC-T02/LC-T03仍未启动，下文保留原始分析和提案记录。**
+
+用户希望基于损失趋势继续调参。本次只读取既有R08/R08-LC/R08-GD/R08-GD-LC日志和best/latest checkpoint标量，不修改代码/配置或在训R04-ELC，不启动候选实验。外部参考仅用于确认锥包含关系和可学习曲率/尺度的一般实现：[原始蕴涵锥论文](https://arxiv.org/abs/1804.01882)、[MERU官方实现](https://github.com/facebookresearch/meru/blob/main/meru/models.py)；下列测量与建议依据本仓库实际日志/实现，不从别的任务直接搬运最优超参。
+
+**收益判断边界**：FSC R08-LC test=11.140/32.8648/0.8348，优于固定c的R08=13.689/37.2070/0.7883，但val MAE10.23023023023023仍差于9.987987987987989；R08前20轮与30轮选中相同第12轮，可作选择范围参照。GD-LC test15.462/42.5036/0.7238较GD30轮第25轮的19.024/49.7241/0.6219好，但预算20/30不同，不能直接称纯曲率因果收益。GD前20轮val最优第12轮MAE10.578578578578579，仍优于GD-LC20轮第12轮10.891891891891891；该固定GD第12轮对应test尚未知，若无权重快照，应另做固定c/20轮匹配基线，不能拿末轮checkpoint0019当第12轮best。当前两种初始化都有探索性测试改善迹象，但均没有val MAE改善证据，也不能据此宣称蕴涵已稳定胜过各自无辅助基线；GD的无辅助P系列与R系列协议不同。
+
+**共同前20轮曲线**（固定c实际训练30轮；图仅对齐前20轮，CSV保留全部）：
+
+![TT/TV损失、曲率与验证误差](../runs/tpc268_v3_exclude3/planning/entailment_tuning_20261023/entailment_curves_first20.png)
+
+下表为FSC R08-LC的未乘lambda/warmup损失与val，不把加权loss和原始loss混用：
+
+| 轮次 | 原始L_TT | 原始L_TV | val MAE | 曲率c（epoch均值） |
+|---|---:|---:|---:|---:|
+| 1 | 1.0882 | 0.841732 | 10.230230 | 0.912295 |
+| 2 | 0.146233 | 0.00247218 | 14.202202 | 0.811152 |
+| 12 | 0.0257705 | 0.000171737 | 10.235235 | 0.644370 |
+| 20 | 0.0245952 | 1.18907e-05 | 12.024024 | 0.645156 |
+
+L_TT包含taxonomy正边+错误父TT负项+加权species-organ bridge；L_TV目前只有正确单位文本→匹配query的正蕴涵。TV在第2轮已降至约0.00247，第20轮约1.19e-5，而val第1轮10.2302、第12轮10.2352近似持平，第20轮12.0240更差，不能把辅助loss继续下降当计数泛化收益。GD-LC的TV同样由约.8324降到第2轮.002224、第20轮1.66e-5，TT在两种初始化下最终均约.025。
+
+第20轮正确单位→query包含率已近100%，同时错误**species taxonomy节点**→query的训练诊断包含率亦近100%（FSC99.99934%、GD99.99955%）。这是train/no_grad的错误物种taxon诊断，不是test分类准确率，也不是已记录的错误species-organ单位负loss；提示投影可能缺乏区分，但不能仅凭此断言CountGD主预测头/所有表示坍塌。当前代码对这些错误节点query关系没有反向传播排斥项，单纯增大lambda_tv不会直接优化该诊断。
+
+可学习曲率确有可观察的优化作用：第20轮映射触及径向上限的混合text/query比例，FSC固定c为11.7348%、LC约.006647%，GD固定c为6.7119%、LC为0。该比例不等于非法锥率（非法锥均为0），不能把混合统计误称仅视觉query饱和，也不能据此单独证明语义层级有效。曲率未逼近[.1,10]边界，暂不扩大范围或以训练末值作为最佳固定曲率。
+
+best与末轮标量由实际checkpoint读取（float32 clamp/exp）：FSC-LC best第1轮c=.8409649729728699、末轮c=.6453250050544739；GD-LC best第12轮c=.6318109631538391、末轮c约.633296。alpha_t/v也在学习，数值保留checkpoint_scalars.json。当前映射的无量纲半径为`asinh(2K(1+m)) + sqrt(c)*alpha*||raw||`（再做上限4保护），因此c与alpha及投影范数存在尺度耦合，末轮c≈.63–.65不等于独立识别出的生物最优曲率。可学习曲率的改进可能包含优化/尺度适配作用，需匹配消融才能分离。
+
+后期加权TT+TV只占总训练loss标量约.004%，但角度loss与CountGD多层分类/定位loss单位、归约方式不同，不能据此断言辅助梯度太小或机械放大权重。目前没有保存分支梯度范数、log_c梯度/步长或梯度裁剪比例，相关原因均为待验证假设。
+
+**建议第一批以FSC147的R08-LC为固定基线，只改一个参数，均fresh初始化/seed42/20轮；不是把三个候选同时组合**：
+
+| 提案ID | 唯一改动 | 其余保持 | 目的/不确定性 |
+|---|---|---|---|
+| LC-T01（优先） | lr 1e-4→3e-5 | warmup1、lambda_tt=lambda_tv=.05、c_init1 | 检验较慢适配能否减小val震荡；初始/第12轮较好并不独自证明lr过大 |
+| LC-T02 | aux_loss_warmup_epochs 1→3 | 原lr/损失权重/曲率 | 检验辅助项缓慢介入能否改善早期主计数适配，不假定越慢越好 |
+| LC-T03 | lambda_tv .05→.01 | lambda_tt=.05及原lr/warmup | 检验减弱早期正例进锥压力是否有益；不会凭空增加错误关系分离 |
+
+主文本固定R full_taxonomy，不与正在进行的species提示对照混改；R04-ELC按原计划运行完。第一轮按val MAE筛选并观察RMSE/R²，不根据test排名选择参数。若要组合两个赢家，作为新候选再次验证，不能自动宣称相加有效。GD后续单独复核：由于CountGD新增模块为构造初始化，不能默认FSC的较小lr也最优；先保留原1e-4作为对照，必要时单独试5e-5。既有GD专用fresh入口对loss权重有固定检查，未来改lambda需新配置及专用检查支持，本次不绕过或修改原入口。
+
+第二阶段若有val证据：固定其他参数单独搜索lambda_tt∈{.02,.05,.1}（.05已有基线）；或曲率lr倍率∈{.1,1}（默认与主普通参数同lr，目前没有独立lr_c选项，需新增优化器组并保留公共基线）。c_init先保留1，范围[.1,10]、K=.1、clip=.1、bridge/负margin/采样数先不动；temperature与lambda_contrast在contrast关闭时不参与目标，不作为这条分支的有效调参项。无需因TV数值小而盲增其lambda。
+
+未来仅对新run增加诊断时，应记录raw/weighted TT、TV、TT正负/bridge、c与alpha和有效尺度、共享feat_map的主损失/TT/TV梯度范数、log_c梯度/更新、整体裁剪率、分开的text/query径向触顶率及验证集正确/错误taxon或单位包含率；辅助诊断不用于GT校正计数。加入诊断需同版本基线，避免把实现变化混入超参效果。若错误taxon包含长期近100%，可另开TV负蕴涵的机制实验；它是新增损失目标，不能与本轮纯数值调参混称一项。预先固定最终方案后再测test，所有已看旧test驱动的新提案仍标探索性，确认性收益需预先固定的配对多seed。
+
+产物`planning/entailment_tuning_20261023/`：PNG/PDF曲线、epoch_metrics.csv、loss_analysis.json、checkpoint_scalars.json、proposed_tuning.json。以上是10月23日提案时的状态；截至10月25日LC-T01已完成20轮及val/test（见§8.7），LC-T02/03仍未启动，不填写未来指标；其余历史分析与候选定义保留。两份docs同日同步记录。
+
+### 8.7 R04-ELC与LC-T01：20轮完成结果（2026-10-25）
+
+两组均FSC147 CountGD fresh初始化、seed42、20轮、TT/TV各.05、无contrast、共享可学习曲率初始1；最低val MAE选权重后，本日仅测该固定权重的完整2000张test。R04-ELC第14轮，主caption为`{organ} of {species} .`、普通lr1e-4；LC-T01第18轮，主caption为R full_taxonomy、普通lr3e-5。特殊linear-projection组仍1e-5。val/test数值见§6/7。
+
+有效配置逐项比较：LC-T01相对R08-LC只差lr；R04-ELC相对R06-ELC/R08-LC只差prompt_mode。共同20轮预算，无初始化、数据划分或推理改动，LC-T01同图caption亦逐项相同。
+
+| 配对 | split | ΔMAE | ΔRMSE | ΔR² |
+|---|---|---:|---:|---:|
+| LC-T01−R08-LC | val | -0.6647（-6.50%） | +2.6315（+9.19%） | -0.013760 |
+| LC-T01−R08-LC | test | -1.5040（-13.50%） | -4.0075（-12.19%） | +0.037822 |
+| R04-ELC−R06-ELC | val | -0.0240（-0.24%） | -2.3493（-7.12%） | +0.013051 |
+| R04-ELC−R06-ELC | test | +1.1180（+9.92%） | +4.2517（+13.64%） | -0.043308 |
+| R04-ELC−R08-LC | val | -0.0681（-0.67%） | +2.0092（+7.02%） | -0.010397 |
+| R04-ELC−R08-LC | test | +1.2455（+11.18%） | +2.5681（+7.81%） | -0.026820 |
+
+降低普通lr使val MAE由10.2302降为9.5656（−6.4971%），但val RMSE由28.6251升至31.2567（+9.1931%）、R²降低；不能把它称为验证集全面改善。LC-T01 test相对R08-LC：MAE变化-13.5009%、RMSE变化-12.1938%、R²变化+0.03782238。当前seed42下，较小普通lr改善val MAE及test三指标，支持其作为需独立确认的候选；val RMSE/R²仍退化，不能称所有指标全面改善。按预先固定的val MAE规则保留第18轮，不根据test更换权重或继续选择超参。
+
+加入物种主文本（R04-ELC对R06-ELC）使val MAE微降0.2358%、RMSE降7.1226%；test MAE变化+9.9223%、RMSE变化+13.6354%、R²变化-0.04330775。相对全分类主文本R08-LC，仅改为organ+species：test MAE变化+11.1804%、RMSE变化+7.8141%、R²变化-0.02681959。这里只能描述当前seed42/当前模型下主文本与优化设置的配对观察；不是多seed稳定收益、纯几何有效性或任意文本策略普遍优劣的证明。
+
+两项是已看历史test后提出的探索性对照，本次用户明确要求补测；不把新test用于选epoch/阈值/后续参数，不启动LC-T02/03。核验JSON保存完整指标、实际来源、同路径/GT/caption与配置差异。
+
+### 8.8 LC-T01损失诊断与下一批单因素调参（2026-10-25）
+
+**后续授权：用户要求在GPU0/1/2分别启动LC-T04/05/06，已实现配置/后台入口并正式训练，当前启动核验状态见§5及末节；下文分析保留原提案时点。**
+
+本次重新读取LC-T01与R08-LC各20条完整正式train+val日志，检查test_split=val、999图、有效LR日程与有限指标，记录日志SHA。分析只使用既有日志/最佳权重元数据，不改模型、配置、数据、环境或训练/推理协议；不启动实验。当前较小lr候选依据val MAE及稳定性，已暴露test结果不用于本批参数排序或改epoch规则。
+
+![LC-T01与原学习率的损失及验证曲线](../runs/tpc268_v3_exclude3/planning/lc_t01_followup_20261025/lc_t01_vs_r08lc.png)
+
+上图虚线表示第10轮后LR衰减：普通组3e-5→3e-6，特殊linear-projection组1e-5→1e-6；两者均由现有StepLR作用。下表TT/TV是未乘lambda/warmup的原始loss，c是epoch均值，不冒充该轮checkpoint精确值：
+
+| 轮次 | 原始TT | 原始TV | c（epoch均值） | val MAE | val RMSE |
+|---|---:|---:|---:|---:|---:|
+| 1 | 1.84936 | 1.71975 | 0.970462 | 10.1191 | 29.1806 |
+| 2 | 0.817238 | 0.0772801 | 0.923391 | 11.5786 | 29.8997 |
+| 4 | 0.246016 | 0.00643081 | 0.863066 | 9.5696 | 29.2015 |
+| 10 | 0.0533015 | 0.000442432 | 0.768380 | 9.8358 | 26.8694 |
+| 18 | 0.0433478 | 3.93692e-05 | 0.756640 | 9.5656 | 31.2567 |
+| 20 | 0.0427784 | 4.46097e-05 | 0.755288 | 10.3223 | 34.3846 |
+
+**观察与边界**：
+
+- 降低普通lr后，前10轮val MAE跨轮总体标准差由1.334904降至.598194，后10轮由.568772降至.186624；这是同一seed内跨轮波动，不是多seed方差或置信区间。后10轮val MAE均值为9.932432，较原lr的11.184885好。
+- 第4轮MAE9.56956956956957与第18轮9.565565565565565仅差.004004（999张绝对误差总和差4）；第4轮RMSE29.20148500892937也低于第18轮31.256663。第18轮仍按预定最低MAE规则作为最终best，不事后改报第4轮test。不能因为best在第18轮就推断还需延长训练；暂不优先增加预算。
+- TV从1.719755降到第2轮.0772801、第4轮.00643081、第18轮3.93692e-5；第20轮4.46097e-5。20个epoch均值加权TV标量的总和中，前5轮占99.3477%；这不是梯度贡献比例。TV目前只有正确单位文本→query的正蕴涵，数值很小不等于层级区分学好，也不支持盲增lambda_tv。第20轮错误species taxon→query训练包含率约99.99996%，是no_grad诊断，不是错误unit负loss、test错误率或主模型坍塌证明。
+- TT仍由1.849359降至.0427784，但原lr最终TT更低（.0245952），计数val却更差。不存在“TT必须降到原lr一样低才有用”的证据，暂保留lambda_tt=.05，不按原始loss大小机械增权。辅助梯度范数/裁剪率没有记录，早期干扰或梯度太强只是待检验解释。
+- 最佳checkpoint c=.7562490701675415，末轮epoch均值.7552878，离[.1,10]边界很远；20轮混合text/query径向触顶率和非法锥率均0。保持c_init1/范围[.1,10]及共享可学习c；c与alpha_t/v及投影范数耦合，普通lr改变同时影响它们，不能认定.756是通用最优固定曲率或把收益单独归因c。
+
+**下一批以LC-T01为固定匹配基线，fresh原FSC147初始化/seed42/20轮，独立单因素比较，不累积三个变更**：
+
+| 新提案ID | 优先级 | 相对LC-T01唯一改动 | 目的与风险 |
+|---|---:|---|---|
+| LC-T04 | 1 | lambda_tv .05→.01；lr仍3e-5、TT仍.05、warmup仍1 | 检验减弱早期正例进锥压力是否改善计数；不会增加负TV，也没有已证实权重过大或必然收益 |
+| LC-T05 | 2 | 普通lr 3e-5→1e-5；TT/TV仍.05/.05、warmup仍1 | 对已获val改善的lr做局部下探；20轮内可能适配不足，特殊projection组初始仍1e-5，c/alpha仍随普通组 |
+| LC-T06 | 3 | aux warmup 1→3；lr仍3e-5、TT/TV仍.05/.05 | 单独检验TT+TV缓慢介入，和LC-T04不叠加；当前未测分支梯度冲突 |
+
+如果只做一组，优先LC-T04。TV后期已接近0，使这项实验主要检验早期辅助约束的影响；该方向是可证伪的假设，.01不是从日志推导出的最优值。三组均保留full_taxonomy主caption/3exemplars、原6998/999/2000划分及三图代码排除、同registry/环境/阈值/模型/冻结/主损失，预算20轮，按val MAE选best并记录RMSE/R²。最终候选固定后再测test，不因某次test更好就继续选超参；单seed候选收益需预先固定的匹配seed43/44确认。
+
+原LC-T02/03仍保留10月23日以R08-LC、lr1e-4为基线的提案定义，不悄悄换成LC-T01；它们仍未启动。原分析时新LC-T04/05/06均PROPOSED_NOT_LAUNCHED；现用户已授权，三项配置与专用检查已实现并实际后台训练，PID/配置与来源见末节，性能仍未知。新入口按各自有效权重检查criterion，不复用旧入口固定lambda=.05的断言。
+
+日程核查补记：当前main.py:208始终构建StepLR，multi_step_lr/lr_drop_list分支处于注释中，直接设这两个配置不会生效。lr_drop=5会每5轮反复降10倍，20轮中将出现3e-5/3e-6/3e-7/3e-8，不等于只在第5轮后降一次。此语义已核对[PyTorch StepLR官方文档](https://docs.pytorch.org/docs/stable/generated/torch.optim.lr_scheduler.StepLR.html)及当前源码；本次不修改scheduler实现，也不把无效配置当可执行建议。如未来改变日程或增加梯度诊断/独立c参数组，单独记录实现与匹配baseline。
+
+产物为planning/lc_t01_followup_20261025/下analyze.py、epoch_metrics.csv、analysis.json、proposed_followup.json、PNG/PDF曲线。曲线/数值均来自原始20轮日志；提案收益未知。原分析步骤仅更新两份docs/曲线，没有启动训练或测试；随后用户明确授权启动三项训练，实测结果表仍待完整val后更新。
+
 ## 9. 代码、环境、产物与可追溯性
 
 当前环境实测：Python3.10.12、torch2.13.0+cu130、torchvision0.28.0+cu130、transformers4.57.6、timm1.0.28；GPU为RTX3090。CUDA扩展曾用GCC11及虚拟环境CUDA13编译器构建，六项forward/gradcheck通过。当前系统默认nvcc可能与该构建环境不同，不用nvidia-smi版本代替编译器版本。维持现有uv环境，不在训练中途sync移除额外扩展。
@@ -334,8 +523,14 @@ R01/R02/R03在`9df0651`且dirty的工作区启动，不代表它们用了未排�
 | R05 | `organ_baseline_seed42/` | `run_r05.sh` | `organ_baseline_seed42/config_args_all.json`、`log.txt`、`console.txt`、`checkpoint_best_regular.pth`（若已生成） |
 | R07 | `contrast_seed42/` | `run_r07.sh` | `contrast_seed42/config_args_all.json`、`log.txt`、`console.txt`、`checkpoint_best_regular.pth`（若已生成） |
 | R08 | `entailment_seed42/` | `run_r08.sh`、`run_r08_test_final.sh` | best epoch11；`val/`及`test_final/`的metrics、counts、checkpoint_metadata、verified、status/exitcode、SHA和源码记录 |
+| R06-ELC | `organ_entailment_learnable_seed42_e20/` | `run_r06_entailment_learnable_e20.sh`、`run_r06_entailment_learnable_test.sh` | best epoch17，c=0.62728363；`val/`及`test_final/`完整指标/计数、SHA、源码/依赖及集合核验 |
+| R04-ELC | `species_entailment_learnable_seed42_e20/` | `run_r04_entailment_learnable_e20.sh`、`run_r04_entailment_learnable_test.sh` | best epoch13，c=0.63700980；20轮日志、独立val、test_final完整指标/计数/权重SHA/源和依赖核验 |
 | R08-GD | `entailment_groundingdino_seed42/` | `run_r08_groundingdino.sh`、`run_r08_groundingdino_test.sh` | best epoch24；`val/`及`test_final/`完整指标/逐图计数、SHA、源码/依赖核验；首次后处理失败及修正证据保留 |
 | R08-GD-LC | `entailment_groundingdino_learnable_seed42_e20/` | `run_r08_groundingdino_learnable_e20.sh`、`run_r08_groundingdino_learnable_test.sh` | best epoch11，c=0.63181096；`val/`及`test_final/`完整指标/逐图计数、SHA、源码/依赖与完整集合核验 |
+| LC-T01 | `entailment_learnable_lr3e5_seed42_e20/` | `run_lc_t01_lr3e5_e20.sh`、`run_lc_t01_lr3e5_test.sh` | best epoch17，c=0.75624907；20轮日志、独立val、test_final完整指标/计数/权重SHA/源和依赖核验 |
+| LC-T04 | `entailment_learnable_lr3e5_tv001_seed42_e20/` | `run_lc_followup_e20.sh LC-T04` | `launch_manifest.json`、`cpu_initialization_report.json`、`launch_sources/`、`launch_verified.json`、真实console与stage/status；20轮后best-val |
+| LC-T05 | `entailment_learnable_lr1e5_seed42_e20/` | `run_lc_followup_e20.sh LC-T05` | `launch_manifest.json`、`cpu_initialization_report.json`、`launch_sources/`、`launch_verified.json`、真实console与stage/status；20轮后best-val |
+| LC-T06 | `entailment_learnable_lr3e5_warmup3_seed42_e20/` | `run_lc_followup_e20.sh LC-T06` | `launch_manifest.json`、`cpu_initialization_report.json`、`launch_sources/`、`launch_verified.json`、真实console与stage/status；20轮后best-val |
 
 - 最佳checkpoint：`<run>/checkpoint_best_regular.pth`；latest：`<run>/checkpoint.pth`。训练根目录`val_metrics.json`通常是末轮，**最终比较只使用`<run>/val/val_metrics.json`**。本报告运行中best取训练日志并核对best checkpoint，而不把根目录末轮指标冒充best。
 - 独立重评：`<run>/val/val_metrics.json`、`val_counts.json`；test：`<run>/test/test_metrics.json`、`test_counts.json`、`checkpoint.sha256`、`run_test.sh`、`status`/`exitcode`。R01/R02配对test比较在`R01_R02_test_comparison.json`。
@@ -353,6 +548,8 @@ R01/R02/R03在`9df0651`且dirty的工作区启动，不代表它们用了未排�
 | R05最终best | [val_metrics.json](../runs/tpc268_v3_exclude3/organ_baseline_seed42/val/val_metrics.json) | [test_metrics.json](../runs/tpc268_v3_exclude3/organ_baseline_seed42/test_snapshot_20261016_153930/test_metrics.json) | [test_counts.json](../runs/tpc268_v3_exclude3/organ_baseline_seed42/test_snapshot_20261016_153930/test_counts.json) |
 | R07最终best | [val_metrics.json](../runs/tpc268_v3_exclude3/contrast_seed42/val/val_metrics.json) | [test_metrics.json](../runs/tpc268_v3_exclude3/contrast_seed42/test_final/test_metrics.json) | [test_counts.json](../runs/tpc268_v3_exclude3/contrast_seed42/test_final/test_counts.json) |
 | R07快照 | 第1轮正式训练val日志及snapshot_metadata.json | [test_metrics.json](../runs/tpc268_v3_exclude3/contrast_seed42/test_snapshot_20261016_153930/test_metrics.json) | [test_counts.json](../runs/tpc268_v3_exclude3/contrast_seed42/test_snapshot_20261016_153930/test_counts.json) |
+| R04-ELC | [val_metrics.json](../runs/tpc268_v3_exclude3/species_entailment_learnable_seed42_e20/val/val_metrics.json) | [test_metrics.json](../runs/tpc268_v3_exclude3/species_entailment_learnable_seed42_e20/test_final/test_metrics.json) | [test_counts.json](../runs/tpc268_v3_exclude3/species_entailment_learnable_seed42_e20/test_final/test_counts.json) |
+| LC-T01 | [val_metrics.json](../runs/tpc268_v3_exclude3/entailment_learnable_lr3e5_seed42_e20/val/val_metrics.json) | [test_metrics.json](../runs/tpc268_v3_exclude3/entailment_learnable_lr3e5_seed42_e20/test_final/test_metrics.json) | [test_counts.json](../runs/tpc268_v3_exclude3/entailment_learnable_lr3e5_seed42_e20/test_final/test_counts.json) |
 
 ## 10. 后续持续更新规则
 
@@ -1096,3 +1293,215 @@ run `entailment_groundingdino_learnable_seed42_e20`，20轮/seed42，训练及�
 同20轮、同可学习曲率的初始化配对R08-LC：val MAE+6.46771037%、RMSE+9.37897012%、R²−0.014050929704103043；test MAE+4.322（+38.79712747%）、RMSE+9.638765758901663（+29.32854030%）、R²−0.11108340194321409。当前seed42下改GroundingDINO初始化没有性能收益。与GD30轮最终test相比三指标较好，但20与30轮选择范围不同，不据此归因曲率；GD前20轮最优第12轮val=10.578578578578579/31.36271065484646/0.9141086453992188，对应test尚未知。因此当前GD初始化下尚无完整等预算test的曲率结论，也不能扩大成所有双曲方案均无效；不据test改变在训实验、阈值或选择epoch。
 
 证据位于`test_final/`：`test_metrics.json`、`test_counts.json`、`checkpoint_metadata.json`、`verified.json`、`checkpoint.sha256`、`launch_verified.json`、`gpu_at_eval_start.csv`、`status`/`exitcode`及完整console/脚本快照。汇总`planning/r08_gd_lc_test_results_20261022.json`。两份docs同步更新主表与分析；本次仅本地评估脚本/结果记录，无模型/loss/config、数据/标注改动。
+
+
+## 2026-10-22 虚拟环境终端提示名称修正（不改变实验协议）
+
+用户已将`.venv/pyvenv.cfg`的prompt改为countgd，但uv创建环境时生成的激活脚本仍嵌入hgic，激活不会重新从pyvenv.cfg读取该字段，因此自动激活继续显示旧名称。本次只把主`.venv/bin/`下activate、activate.bat/csh/fish/nu/ps1/xsh与activate_this.py中的嵌入提示名称统一为countgd，保留其他字节/换行及脚本权限；pyvenv.cfg沿用用户设置。已用独立bash实际激活/退出验证提示名称及原提示恢复。
+
+这仅影响后续shell激活时显示的环境名称，不修改解释器、依赖包、CUDA算子、pyproject/uv.lock、训练/推理代码、数据或实验协议；现有运行进程和实测结果不变，无需新实验基线。已打开终端需要重新source .venv/bin/activate或重开终端才能更新其进程内提示。两份docs同日同步补记。
+
+
+## 2026-10-23 R06-ELC训练完成与第18轮best测试准备（10:50核查）
+
+用户要求核查新结束实验，缺少test则补测。实际新完成为R06-ELC，run `organ_entailment_learnable_seed42_e20`，训练及独立best-val于10月22日16:46:26 DONE、退出0；完整20条训练/val日志按最低val MAE选择第18轮（epoch17），独立val999图=10.186186186186186/32.983570393696255/0.9050013136725523。此前第5轮best已被更新；不能把旧进度中的最佳性能当作最终best。当前该run尚无test产物。10:50实查GPU0–3全部无计算进程，均24124MiB空闲，本次选GPU3评估。
+
+设置沿用原R06-ELC：FSC147 CountGD原始checkpoint独立fresh初始化（不是GroundingDINO、不是从R06权重续训），organ主caption `{organ} .`（如`fruit .`，含语义文本，不是纯视觉），验证/test3图像exemplar；CountGD主计数损失保留，辅助仅原Lorentz TT/TV .05/.05、contrast关闭，TT负父项/bridge保持，TT/TV共享可学习c（初始1，范围[.1,10]）。seed42、20epochs、train batch4/eval实际batch1、原冻结/增强/AdamW/StepLR10、修复mask、三图代码排除/registry及环境不变。最佳权重实际c待checkpoint读取，不用末轮训练日志均值替代。
+
+新增本地`runs/tpc268_v3_exclude3/run_r06_entailment_learnable_test.sh`，复用已验证20轮best-test脚本，仅固定本run/config/GPU3/最佳epoch17和FSC147+organ预检；bash与内嵌Python语法检查通过，保留明确20轮/2000图断言。nohup+setsid、防重复flock、uv离线原解释器，不重新训练/初始化。开始前复查当前剩余显存≥8192MiB、20轮val选出的最佳checkpoint/配置、训练清单89项源/资产hash、63项原依赖实际版本/native hash；只评估val选定第18轮，不按test换epoch/调阈值。
+
+完整2000图test沿用整图800/max1333、阈值.23/text0、无crop/SAM/计数校正、相同organ caption及3exemplar。完成后核对官方测试路径唯一且完整、GT原annotation点数、非负整数预测，独立重算MAE/RMSE/R²，核对best-val推理/training_protocol以及checkpoint前后SHA。结果写入本run/test_final；当前实测test、PID、最佳c与完成状态待运行后记录。相对R06同20轮同时改变contrast开关和曲率学习，不能单独归因；R08-LC同20轮可作为主caption参照，R05前20轮选择best作为无辅助参照。数据/标注、模型/loss/config与已有实验均不改，两份docs同步更新。
+
+```bash
+nohup setsid bash runs/tpc268_v3_exclude3/run_r06_entailment_learnable_test.sh > runs/tpc268_v3_exclude3/launch_organ_entailment_learnable_seed42_e20_test.log 2>&1 < /dev/null &
+```
+
+### 2026-10-23 R06-ELC测试启动核实（10:53:06）
+
+10:52:28进入RUNNING；后台PID3351310/推理PID3351689，宿主机核实PPID1、SID3351310、无TTY，GPU3推理约3004MiB，当前110/2000图。严格加载最终best epoch17=第18轮，无missing/unexpected；best c=0.6272836327552795，SHA256=6be3e8a78cd2df96046055767c3678e5b1e7ea50f392dc5c6c1f6b9f01bbfb47。89份源/资产hash与本run训练manifest一致，63项原依赖实际版本/native hash通过。训练HEAD6341592d13575f3626bc70f08604b96ab231f4ef，评估HEAD92edcb72b986181bdd7c68ca7d74689d77b45466，不能仅凭HEAD差异推断运行代码变化；实际被核验的模型/数据/配置/native源hash均相同。已有shell提示名称countgd改动只影响激活显示，不影响解释器/依赖或运行进程。完整test指标仍待结束核验；两份docs同步补记。
+
+
+## 2026-10-23 R06-ELC第18轮最终best完整test完成（10:58:57）
+
+run `organ_entailment_learnable_seed42_e20`，训练20轮seed42及独立best-val于10月22日16:46:26 DONE/退出0；20轮最低val MAE选最终第18轮（epoch17），取代先前第5轮best。新test在GPU3于10月23日10:52:28开始，10:58:57 DONE/退出0，实际推理约6分07秒。后台PID3351310、推理PID3351689（PPID1/SID3351310/无TTY）；10:59:39实查GPU3释放至used1MiB/free24124MiB，四卡均无计算进程。
+
+| 数据 | best轮次 | 图像数 | MAE | RMSE | R² |
+|---|---:|---:|---:|---:|---:|
+| val（独立best重评） | 18 | 999 | 10.186186186186186 | 32.983570393696255 | 0.9050013136725523 |
+| test（本次实测） | 18 | 2000 | 11.2675 | 31.181188239064912 | 0.851329780365249 |
+
+最佳权重c=0.6272836327552795，初始1，TT/TV共享可学习Lorentz曲率。设置为FSC147 CountGD fresh初始化、organ文本`{organ} .`（如`fruit .`）+3视觉exemplar，CountGD主计数损失+TT/TV .05/.05、无contrast；原TT负父/bridge与主模型/增强/冻结/优化/数据/修复mask协议均保持。本次测试只读第18轮best，不按test选择其他epoch。旧第5轮RMSE较低不改变预先固定的最低val MAE选权重规则。
+
+独立核验全部通过：2000路径唯一且等于官方test split、GT=原annotation点数、非负整数预测，逐图重算MAE/RMSE/R²一致（R²末位浮点差异在容差内），推理和training_protocol与best-val一致；曲率/初始c/learn_curvature由checkpoint_metadata额外保存，补足旧协议摘要未列这些字段的边界。checkpoint SHA256=`6be3e8a78cd2df96046055767c3678e5b1e7ea50f392dc5c6c1f6b9f01bbfb47`，前后相同。89份源/资产hash和63项原依赖实际版本/native hash与本run训练清单匹配。训练HEAD6341592d13575f3626bc70f08604b96ab231f4ef、评估HEAD92edcb72b986181bdd7c68ca7d74689d77b45466；HEAD不同不等于训练/评估核心源不同，实际检查以hash为准，不声称所有旧基线整个环境逐字节相同。
+
+比较结果（MAE/RMSE/R²）：
+
+| 参照 | test ΔMAE | test ΔRMSE | test ΔR² | 可支持的解释 |
+|---|---:|---:|---:|---|
+| R05 organ无辅助 | +0.7205（+6.8313%） | +1.3106174（+4.3877%） | −0.01223525 | 三项测试指标较差；val MAE降低2.7709%未转化为测试收益 |
+| R06 organ完整辅助，20轮 | +0.5335（+4.9702%） | +0.4568494（+1.4869%） | −0.00432455 | 关闭contrast且学习曲率的组合未改善测试表现，不能分离两个开关贡献 |
+| R08-LC full-taxonomy、TT/TV/可学习c，20轮 | +0.1275（+1.1445%） | −1.6836106（−5.1228%） | +0.01648816 | 本次有效配置仅主caption不同，organ下MAE稍差、RMSE/R²较好，是指标取舍 |
+
+R05原30轮的前20轮日志最优仍第12轮，与正式best一致，StepLR10不依赖总epochs，可作20轮选择范围参照；不冒称R05只训练了20轮，保留旧run dirty源码归档不足及监控元数据差异的可重建性边界。R06-ELC相对R06的val MAE降低4.2709%，但val RMSE增加26.6405%，test三指标也较差；最低val MAE的改善不能代替测试整体收益。所有结论限当前seed/协议，不据此次test继续调阈值、换epoch或修改在训实验，不据此宣称双曲几何普遍无效。
+
+证据`test_final/test_metrics.json`、`test_counts.json`、`checkpoint_metadata.json`、`verified.json`、`checkpoint.sha256`、`launch_verified.json`、`gpu_at_eval_start.csv`、`status`/`exitcode`及完整console/脚本快照；汇总`planning/r06_elc_test_results_20261023.json`。两份docs同步更新主表与分析；本次仅新增本地评估脚本和记录，模型/loss/config、数据/标注及训练协议保持不变。
+
+
+## 2026-10-23 R04-ELC：R06-ELC的器官+物种主文本配对实验（准备）
+
+用户授权保持R06-ELC其余设置，只把主文本改为物种名+器官，在空闲GPU后台训练。新ID=R04-ELC，run=`species_entailment_learnable_seed42_e20`，新配置`config/cfg_tpc268_species_entailment_learnable.py`继承R06-ELC的organ_entailment_learnable，只设prompt_mode='species'。这里species模式实际模板是`{organ} of {species} .`，例`fruit of Malus domestica .`，不含界门纲目科属等祖先文本；不把模式名误解为只有物种名。仅复用已有caption模式，main/Dataset/model/loss均不修改。
+
+主配对R06-ELC同seed42/20轮，唯一有效配置变化为prompt_mode organ→species；初始化仍为原FSC147 CountGD checkpoint（model-only fresh），不使用R06-ELC的TPC best/latest权重、optimizer、scheduler或RNG。CountGD主计数损失保留，辅助仅原Lorentz TT/TV .05/.05，contrast关闭，原TT负父项和species-organ bridge不变；TT/TV共享可学习c，初始1、范围[.1,10]，原可学习alpha尺度保持。辅助文本/分类监督、缺链策略和既有aliases/registry均不变，仅更改主计数caption。
+
+train6998/val999/test2000、三图代码排除/原始标注不动，3个原始exemplar（训练经原增强）、修复padding mask、冻结backbone.0/bert、900queries、中心监督、FP32/train batch4/eval实际batch1、workers4、AdamW lr/wd1e-4/clip.1/StepLR10、原resize/crop/flip及整图推理阈值.23/0均保持。另有同20轮R08-LC可作full_taxonomy→species的主文本对照；不能把R04原30轮完整辅助方案当本次仅改文本的配对基线。
+
+11:27:55宿主机核实GPU2无计算进程、used4MiB/free24121MiB；GPU3出现短时新进程，因此固定选GPU2。新本地脚本`run_r04_entailment_learnable_e20.sh`带nohup+setsid/flock、防已有产物覆盖/隐式resume、uv离线显式原解释器；CPU检查结束后每15秒查询GPU2，须used≤64MiB且free≥20000MiB才进入正式训练，不终止或调整其他任务。
+
+启动预检将核对相对R06-ELC仅prompt配置差异，训练源/资产清单89份逐hash相同、63项原依赖实际版本/native hash及初始化SHA；相对旧R08-LC仅保留已审计监控依赖两个精确元数据差异，不安装/sync环境。额外检查全部split路径/GT计数和registry相同、所有新caption格式与BERT长度/单目标标点，覆盖已解析和未解析物种的9个代表样本在同RNG下图像和全部非文本target/RNG状态相同。实际CPU构造/严格FSC147加载与原曲率参数/梯度检查；该检查模型丢弃，正式新进程重设seed42 fresh训练。以上为待执行检查，未提前写通过或填写指标。
+
+正式预算20轮，每轮完整999图val，按最低val MAE选best，训练后独立重评best-val；与R06-ELC原训练脚本相同，不自动test、不按已有test调参数或epoch。run另存源码/资产hash、配置/脚本快照、HEAD/dirty diff、数据配对和曲率检查证据及status/stage/exitcode；新配置尚未提交，不仅用HEAD标识源码。验证/测试结果未知。本次是在已看既有test后提出的探索性单seed输入对照；两份docs同步更新协议/状态。
+
+```bash
+nohup setsid bash runs/tpc268_v3_exclude3/run_r04_entailment_learnable_e20.sh > runs/tpc268_v3_exclude3/launch_species_entailment_learnable_seed42_e20.log 2>&1 < /dev/null &
+tail -f runs/tpc268_v3_exclude3/launch_species_entailment_learnable_seed42_e20.log
+```
+
+### 2026-10-23 R04-ELC正式启动核验（11:36:43 Asia/Shanghai）
+
+预检全部通过，11:35:38进入TRAINING；GPU2启动前实际used4MiB/free24121MiB，通过空闲门槛。后台PID3410506，PPID1/SID3410506/无TTY，训练PID3411377已在宿主机GPU2核实，瞬时显存11796MiB；nohup+setsid独立于SSH。当前第1/20轮（epoch0）、batch20/1749，完整train+val轮次0，best轮次/val/test均未知，不重复启动。
+
+配置与R06-ELC逐项比较，唯一差异prompt_mode organ→species；与R08-LC仅full_taxonomy→species。原R06-ELC训练清单89份源/资产hash均逐项一致，63项原已安装依赖实际版本/native hash通过；R08-LC旧清单77项相同，另有已审计nvitop监控依赖元数据两个精确hash差异，完整环境身份边界保留，未安装或同步依赖。
+
+实际数据配对检查：train6998/val999/test2000路径及原GT计数完全相同、registry fingerprint相同，三张图仍只在代码层排除；全部新caption均为organ of species单目标，无祖先后缀，BERT含3exemplar最大token分别17/16/17、无截断。9个含完整/缺失分类链的代表样本，同seed下增强后图像、全部非caption/cap_list target及Python/NumPy/Torch RNG状态相同。这不冒称逐张重跑了全部图像增强，完整坐标协议沿用已核验源/原数据。
+
+CPU真实模型严格加载FSC147共享1146项，仅12项新taxonomy状态保留构造初始化，unexpected为空，不加载TPC权重或optimizer/scheduler/RNG；log_c为可学习Parameter且唯一进入原lr1e-4优化器组，合成几何梯度0.2475481778383255、c由1→0.9998999834060669，非法锥0。CPU检查模型丢弃，正式GPU进程从原FSC147/seed42 fresh启动。实际前20批loss有限，最新loss26.4017，含TT/TV且无contrast，曲率已由1→日志0.9996，非法锥率0。
+
+启动HEAD=92edcb72b986181bdd7c68ca7d74689d77b45466，新配置和文档未提交，原用户已有文件删除保留；launch_sources保存新配置/启动脚本及pyproject/uv.lock，完整身份以launch_manifest/hash/dirty diff与工作区记录为准。新run中的paired_data_check、cpu_initialization_report、launch_verified和gpu_at_training_start留存实际证据。后续继续20轮→最低val MAE选best→独立best-val，不自动test；模型/loss/Dataset及既有运行不改。两份docs同步更新矩阵/状态/本记录。
+
+
+## 2026-10-23 按初始化来源分组汇总维护记录
+
+依用户要求，新增§7.1 GroundingDINO/FSC147 CountGD两组完整实验结果与三组匹配初始化对照表；16个已完成实验的32份val/test结果均从逐图计数重算，核对999/2000官方路径、原始GT点数及整数预测，全部一致。第17个R04-ELC仍训练，无完整val/test，保持未知；R09未启动不纳入实测分组。补齐P04最终DONE/第5轮best与真实val/test，旧历史记录保留原日期。完整证据路径/状态/初始化/轮次/指标与可得run提交记在planning/results_by_initialization_20261023.json，缺失单独commit文件记null而不猜测。
+
+两份docs同日更新；本次不新增或重跑实验，不变更模型、初始化、数据/标注、训练/推理协议、环境或GPU2在训R04-ELC。R/P协议仍分开解释，不从初始化分组中推出不同文本/环境/预算可直接比较，三组配对结论限现有seed42及可追溯性边界。
+
+
+## 2026-10-23 初始化分组表的器官文本展示过滤
+
+依用户要求，将“只有器官没有文本”按主caption仅有器官、不含物种名解释：§7.1移除R05/R06/R06-ELC/P04四行，保留13行（GD4、FSC147 9），含12个完成实验和R04-ELC在训。R04-ELC等species模式含organ+species，继续保留；辅助分支是否使用taxonomy不作为本次筛选条件。表中指标/状态沿用既有核验时间，不据本次排版声称新进度。
+
+此为展示过滤，不删除实验结果、数据样本或标注，不修改训练/推理协议与在训任务；完整主表/原始JSON和所有run仍保留。另存派生结果results_by_initialization_species_text_20261023.json记录来源快照与排除的实验ID，保留完整快照可追溯性。两份docs同日同步补记。
+
+
+## 2026-10-23 LC-T01：GPU0降低学习率对照（准备）
+
+用户要求在GPU0执行上一条建议的第一项实验，因此固定LC-T01，run `entailment_learnable_lr3e5_seed42_e20`。新增`config/cfg_tpc268_entailment_learnable_lr3e5.py`继承R08-LC，只设置lr=3e-5；主要配对基线为FSC147 CountGD初始化的R08-LC，同seed42/20轮/全分类主文本/3exemplar/TTTV各.05/可学习c初始1/范围[.1,10]/warmup1/无contrast。fresh加载原FSC147模型，不续训R08-LC best/latest，不加载TPC optimizer/scheduler/RNG。
+
+其余数据6998/999/2000、三图代码排除/registry/原始标注、修复mask、冻结backbone.0/bert、原增强/中心监督、FP32/train batch4/eval实际batch1、AdamW wd1e-4/clip.1/StepLR10及整图推理设置不变。这里lr改变原普通优化器组（包括log_c、alpha和原普通可训练参数），不新增独立曲率组；特殊linear-projection组仍1e-5，冻结backbone配置lr也仍1e-5。以实际参数分组比较，不能误称所有组统一乘0.3。
+
+13:16:35实查GPU0空闲used4MiB/free24121MiB，GPU2 R04-ELC仍在运行。本地`run_lc_t01_lr3e5_e20.sh`固定GPU0、nohup+setsid/flock、防已有产物覆盖/隐式resume、uv离线原解释器；CPU配置/hash/严格初始化/曲率梯度检查后，正式训练前等待used≤64MiB/free≥20000MiB。新配置和内嵌脚本语法检查已过，真实CPU/GPU检查/PID/性能仍待运行核实。
+
+预检要求有效配置相对R08-LC只有lr1e-4→3e-5；R06-ELC清单89项原源/资产hash一致，R08-LC旧77项相同及两个已审计监控元数据精确hash差异，63项原依赖版本/native与FSC147 SHA不变，不安装/sync依赖。CPU真实模型严格共享1146项，仅12项新增taxonomy状态；验证log_c唯一进入lr3e-5普通组、梯度有限且更新，检查模型丢弃，正式GPU独立新进程seed42 fresh训练20轮→val MAE选best→独立best-val，不自动test。
+
+模型/loss/Dataset/旧配置/数据/标注及其他任务不改；两份docs同步准备/协议。新配置未提交，run另存HEAD/dirty diff、配置和脚本快照、源/资产hash与状态，未来指标未知，不将建议写成已测收益。其他调参候选未启动。
+
+```bash
+nohup setsid bash runs/tpc268_v3_exclude3/run_lc_t01_lr3e5_e20.sh > runs/tpc268_v3_exclude3/launch_entailment_learnable_lr3e5_seed42_e20.log 2>&1 < /dev/null &
+```
+
+### 2026-10-23 LC-T01正式训练启动核验（13:20）
+
+13:19:25进入TRAINING，GPU0启动前used4MiB/free24121MiB，空闲门槛通过。后台PID3507464（宿主机核实PPID1/SID3507464/无TTY）、训练PID3507881已实查GPU0，13:20:05瞬时显存9296MiB；nohup+setsid独立于SSH。当前第1/20轮（epoch0），batch20/1749，完整train+val0，best/val/test未知。
+
+实际配置相对R08-LC仅lr=.0001→.00003；原R06-ELC清单89项源/资产hash一致，R08-LC旧77项匹配及两个精确监控元数据差异已审计，63项原依赖版本/native hash和FSC147 SHA通过。CPU实际严格加载FSC147共享1146项，只允许新taxonomy12项，unexpected为空；c参数唯一进3e-5普通组，合成几何梯度.2475481778383255有限，一步c1→.999970018863678。特殊linear-projection组仍1e-5，原冻结设置不变，不把普通组lr变更描述为所有参数组同比下降。
+
+CPU检查模型丢弃后，正式新进程fresh FSC147/seed42训练。实际batch0 loss1492.6223与R08-LC参考batch0完全一致，是相同起点数值的附加核对；不能仅凭单个loss证明所有随机过程逐字节相同。batch20 loss248.9449，所有loss有限、TT/TV存在、contrast关闭、日志lr=.00003、非法锥0。曲率日志四位小数仍1.0000，不虚构已测到非1的GPU曲率；CPU参数/梯度更新检查通过，后续以训练日志/checkpoint记录实际变化。
+
+启动HEAD92edcb72b986181bdd7c68ca7d74689d77b45466，新配置及文档未提交；run另存launch_sources配置/脚本/pyproject/uv.lock、manifest源/资产hash/参数分组、CPU初始化、gpu_at_training_start与launch_verified实际进程证据。原用户工作区删除和R04-ELC文件保持。继续原20轮→最低val MAE选best→独立best-val，无自动test；LC-T02/03仍未启动。两份docs同步更新矩阵/状态/提案进展，既有模型/loss/Dataset、旧配置、数据/标注、环境与其他任务不改。
+
+
+## 2026-10-25 R04-ELC与LC-T01训练完成及补测记录
+
+用户要求汇报刚结束两组实验的val/test，缺少test则补测。实际核对两组log.txt均20条完整train+val记录、训练status/stage DONE、exitcode0及独立best-val：R04-ELC于10月24日10:07:25完成，第14轮最低val MAE，val999张=10.162162162162161/30.63426934755354/0.9180521955583507；LC-T01于10月24日13:13:15完成，第18轮最低val MAE，val999张=9.565565565565565/31.256662953344506/0.9146885175455899（顺序MAE/RMSE/R²）。原10月23日启动记录是历史快照。两组此前均没有test_metrics.json。
+
+12:53:30在实查空闲的GPU2/0分别后台启动run_r04_entailment_learnable_test.sh与run_lc_t01_lr3e5_test.sh，PID380027/380028，宿主机核实PPID1、各自独立SID、无TTY。固定最终val选出的checkpoint_best_regular.pth，输出各自test_final；预检源码/配置/依赖/native/权重身份、完整20轮及best元数据，随后原推理协议测试2000张并独立重算。启动时完整test指标未知；现已全部完成并核验，最终指标见下文，未更换epoch或调阈值。HEAD实查92edcb72b986181bdd7c68ca7d74689d77b45466，配置/文档尚未提交，源码身份以训练manifest和评估快照/hash为准。
+
+两组都从FSC147 CountGD fresh初始化、seed42、TT/TV各.05/可学习c初始1/无contrast；R04-ELC主文本organ+species，普通lr1e-4，仅主caption区别于R06-ELC/R08-LC；LC-T01为R full_taxonomy，普通lr3e-5，相对R08-LC仅普通组学习率改变。模型、loss、数据/标注、环境与训练设置不变，两份docs同步更新；LC-T02/03仍未启动。最终结果与配对比较已同步本节及§5–8主表。
+
+
+### 2026-10-25 两组最终best测试完成与独立核验
+
+R04-ELC：DONE 2026-10-25T13:00:21+08:00、exitcode0；best第14轮，c=0.6370097994804382；val999=10.162162162162161/30.63426934755354/0.9180521955583507，test2000=12.3855/35.432873154741486/0.8080220278659153。权重SHA256=7ef4b6c01d7d8b3f8259b4b47d6fef017f42ba261b7d7ae8fbd804c70591548c，评估前后未变；90份源/资产hash与本run训练manifest一致，63项原依赖实际版本/native SHA匹配。训练HEAD=92edcb72b986181bdd7c68ca7d74689d77b45466，评估HEAD=92edcb72b986181bdd7c68ca7d74689d77b45466，未提交配置仍由manifest/launch_sources/hash定位。
+
+独立核验时间2026-10-25T13:00:20.977420+08:00；2000官方路径唯一且集合一致，每图GT与原annotation点数一致，整数非负预测，三指标独立重算一致；原推理training_protocol、prompt/registry/3exemplars/整图800-max1333/阈值.23-0不变，无crop/SAM/校正。验证集999条计数也在本次重算，与20轮日志最佳及checkpoint一致。
+
+LC-T01：DONE 2026-10-25T13:01:00+08:00、exitcode0；best第18轮，c=0.7562490701675415；val999=9.565565565565565/31.256662953344506/0.9146885175455899，test2000=9.636/28.857338754639173/0.8726639962191843。权重SHA256=5acbecab9f684aae3047c879761658b9ae9a9c3587efd3655cbcd2430f55361f，评估前后未变；91份源/资产hash与本run训练manifest一致，63项原依赖实际版本/native SHA匹配。训练HEAD=92edcb72b986181bdd7c68ca7d74689d77b45466，评估HEAD=92edcb72b986181bdd7c68ca7d74689d77b45466，未提交配置仍由manifest/launch_sources/hash定位。
+
+独立核验时间2026-10-25T13:01:00.510218+08:00；2000官方路径唯一且集合一致，每图GT与原annotation点数一致，整数非负预测，三指标独立重算一致；原推理training_protocol、prompt/registry/3exemplars/整图800-max1333/阈值.23-0不变，无crop/SAM/校正。验证集999条计数也在本次重算，与20轮日志最佳及checkpoint一致。
+
+主表§5–7、初始化筛选表§7.1、配对分析§8.7及调参计划同步更新；核验汇总planning/r04elc_lct01_results_20261025.json。两份docs同日更新；模型/loss/config、数据/标注、初始化、依赖环境及训练/推理协议均未改，无新增训练；LC-T02/03仍PROPOSED_NOT_LAUNCHED。
+
+13:02:10宿主机复查四张GPU均used1MiB/free24124MiB，无计算进程；两组测试已释放GPU0/2，未启动其他训练。
+
+
+## 2026-10-25 LC-T04/05/06：GPU0/1/2后台训练准备
+
+用户明确授权启动上节三个单因素实验，映射为LC-T04→GPU0、LC-T05→GPU1、LC-T06→GPU2；实际查询四卡均used1MiB/free24124MiB、无计算进程。三份新配置都继承LC-T01 cfg_tpc268_entailment_learnable_lr3e5.py；离线解析实际有效配置与LC-T01训练manifest逐键比较，分别仅lambda_tv .05→.01、普通lr3e-5→1e-5、aux_loss_warmup_epochs1→3，其他差异为空。
+
+- LC-T04：`entailment_learnable_lr3e5_tv001_seed42_e20`，配置`cfg_tpc268_entailment_learnable_lr3e5_tv001.py`，GPU0，仅lambda_tv=.01；lr3e-5/TT.05/warmup1。
+- LC-T05：`entailment_learnable_lr1e5_seed42_e20`，配置`cfg_tpc268_entailment_learnable_lr1e5.py`，GPU1，仅普通lr=1e-5；TT/TV .05/.05/warmup1。
+- LC-T06：`entailment_learnable_lr3e5_warmup3_seed42_e20`，配置`cfg_tpc268_entailment_learnable_lr3e5_warmup3.py`，GPU2，仅aux warmup=3；lr3e-5/TT/TV .05/.05。
+
+共用本地入口`run_lc_followup_e20.sh LC-T04|LC-T05|LC-T06`与CPU核验`lc_followup_precheck.py`。各自flock、防已有log/checkpoint/manifest覆盖、nohup+setsid独立session，原uv离线no-project显式.venv，不安装或sync；原6998/999/2000划分及三图代码排除/registry/full_taxonomy/3exemplars/FP32/冻结/AdamW/StepLR10/阈值.23-0均保持。每组独立fresh原FSC147 model-only、seed42/20轮，不续训TPC模型/optimizer/scheduler/RNG；按val MAE选best后独立999图best-val，无自动test。
+
+入口语法/内嵌Python及可用输出目录/主机RAM已检查。后台正式训练前还须实际核对LC-T01清单91份原源码/资产、63项原依赖/native/初始化SHA、CPU严格加载1146共享张量+12新taxonomy项、curvature/alpha参数组归属及有限非零梯度/更新，再次要求目标GPU used≤64MiB/free≥20000MiB。准备时尚无真实CPU/GPU结果和PID；现已实际启动并核验，见下节，完整轮次/best/val/test仍未知；不将合成几何检查称正式性能。
+
+两份docs同步记录新增配置/入口和协议；模型/loss/Dataset/引擎代码、旧配置、数据/标注与依赖环境不改。原用户删除文件与既有未提交配置/文档保持，HEAD及dirty身份由实际launch记录/源hash定位。原LC-T02/03仍未启动，三项按各自val比较，不累计参数变更或按test挑选。
+
+
+### 2026-10-25 三项正式启动核验
+
+LC-T04：TRAINING 2026-10-25T16:47:05+08:00，status RUNNING；GPU0，后台PID441440，实际训练PID441913；宿主机核实PPID1/SID441440/无TTY、CUDA_VISIBLE_DEVICES=0与对应UUID一致。核验时第1/20轮、batch50/1749、完整轮次0；首批loss=1492.6222、最近日志loss=89.9213，所有已输出batch的loss meter有限。best轮次/正式val/test仍未知。启动前GPU used=1MiB/free=24124MiB，核验瞬时进程占用13778MiB。
+
+LC-T05：TRAINING 2026-10-25T16:47:05+08:00，status RUNNING；GPU1，后台PID441441，实际训练PID441890；宿主机核实PPID1/SID441441/无TTY、CUDA_VISIBLE_DEVICES=1与对应UUID一致。核验时第1/20轮、batch50/1749、完整轮次0；首批loss=1492.6223、最近日志loss=162.7807，所有已输出batch的loss meter有限。best轮次/正式val/test仍未知。启动前GPU used=1MiB/free=24124MiB，核验瞬时进程占用13778MiB。
+
+LC-T06：TRAINING 2026-10-25T16:47:04+08:00，status RUNNING；GPU2，后台PID441442，实际训练PID441823；宿主机核实PPID1/SID441442/无TTY、CUDA_VISIBLE_DEVICES=2与对应UUID一致。核验时第1/20轮、batch50/1749、完整轮次0；首批loss=1492.6222、最近日志loss=83.0297，所有已输出batch的loss meter有限。best轮次/正式val/test仍未知。启动前GPU used=1MiB/free=24124MiB，核验瞬时进程占用13778MiB。
+
+三组实际config_args_all逐项匹配各自manifest，并确认seed42/epochs20/batch4/FP32、pretrain原FSC147且resume为空。有效配置对LC-T01各只有一个指定字段差异，91份原源/资产hash全部相同；每run新清单96项，63项原依赖实际版本、native SHA和FSC147 SHA通过。CPU真实严格加载共享1146项，仅12新taxonomy项、unexpected空；curve/alpha各唯一进入普通组，合成有限log_c梯度均.2475481778383255，c1→.999970018863678（LC-T04/06）/.9999899864196777（LC-T05）。CPU模型丢弃，正式GPU独立重置seed42/fresh原FSC147；首批主CE/box/xy损失与LC-T01在打印精度内一致，TT/TV的首批权重按各自lambda及warmup因子核对通过。曲率GPU四位日志仍1.0000，不虚构已测曲率变化或性能改善。
+
+LC-T06 warmup是两项辅助loss权重在前三轮线性升至目标：第1/2/3轮末因子1/3、2/3、1；不是学习率warmup，也没有改变普通lr3e-5。LC-T05普通lr降低会同时影响log_c/alpha，特殊projection组初始仍1e-5；三项均保持StepLR10，未启用注释中的MultiStepLR。
+
+实际启动命令（已在运行，勿重复执行）：
+
+```bash
+nohup setsid bash runs/tpc268_v3_exclude3/run_lc_followup_e20.sh LC-T04 > runs/tpc268_v3_exclude3/launch_entailment_learnable_lr3e5_tv001_seed42_e20.log 2>&1 < /dev/null &
+nohup setsid bash runs/tpc268_v3_exclude3/run_lc_followup_e20.sh LC-T05 > runs/tpc268_v3_exclude3/launch_entailment_learnable_lr1e5_seed42_e20.log 2>&1 < /dev/null &
+nohup setsid bash runs/tpc268_v3_exclude3/run_lc_followup_e20.sh LC-T06 > runs/tpc268_v3_exclude3/launch_entailment_learnable_lr3e5_warmup3_seed42_e20.log 2>&1 < /dev/null &
+```
+
+查看三组日志：
+
+```bash
+tail -f runs/tpc268_v3_exclude3/launch_entailment_learnable_lr{3e5_tv001,1e5,3e5_warmup3}_seed42_e20.log
+```
+
+实际HEAD三组均92edcb72b986181bdd7c68ca7d74689d77b45466，工作区有未提交配置/文档；源身份以各run保存的hash/配置与launcher快照定位，不称HEAD已包含新配置。各run/launch_verified.json及planning/lc_t01_followup_20261025/launch_verified_20261025.json保存实际GPU/进程/初始化/首批证据，proposed_followup.json改RUNNING，旧LC-T02/03继续未启动。三组独立20轮→val MAE选best→独立best-val，无自动test；SSH断开后由独立session继续运行。
+
+两份docs同步更新矩阵/状态/分组/未知指标和代码边界。没有更改模型/loss/engine/Dataset源码、原配置、数据/标注、初始化或依赖环境；仅新增上述三项配置和本地启动/核验入口。
+
+
+## 2026-10-25 BunchCount 标注核查与计划约束（未训练）
+
+本次仅审计 BunchCount、生成可视化并按用户要求修正一处 exemplar；TPC-268 模型、配置、训练/推理协议和已有运行未改。`data/bunchcount-dataset-0928/annotations.json` 中 `690-pencils.individual_exemplars` 原有4个，仅删除最后一个，现为3个；逐记录深比较确认只有该字段变化，其余全部一致。删除框为 `[28.643259048461914,62.03076934814453,390.4894104003906,628.0615234375]`。原标注备份、前后SHA256及机器可读审计保存在 `runs/bunchcount_audit_20261025/annotations.before.json` 与 `audit.json`。
+
+按显式 `bbox_to_points` 检出185个单成员群体，涉及52张图；群体数按train/val/test为32/3/150。这些为用户指出的错误标注，暂仅列清单和可视化，未删除框、关系、个体点或修改群体exemplar，等待用户决定修正方式。逐群体0-based框/点索引、坐标和split见 `singleton_groups.csv/json`；`index.html` 汇总逐图标注及185个局部放大图，另有4张contact sheet。灰框为其他群体、青点为所有个体、红框和黄圈为单成员群体与其唯一成员。
+
+缺失group_description的3张图全部属于train：`coco-trains-000000115118.jpg`、`coco-trains-000000419882.jpg`、`openimages-trains-0001.jpg`；清单见 `missing_group_description.json`，可视化亦已纳入index，字段保持原样，由用户决定处理方法。
+
+用户明确收紧后续BunchCount计划：保留共享900 queries，使用FSC147 CountGD预训练权重；训练GT>900不排除、不截断、不调整query容量或引入特殊采样/分块，保持全部GT及原始计数。联合目标可能超过900，标准一对一匹配只能匹配至多900个query，未匹配GT不能冒称全部接受了匹配监督；评估仍使用完整GT。群体和个体分别报告MAE/RMSE，禁止合并成一个计数指标。此前1024-query建议撤回。未来数据协议对照需使用相同修正版标注、prompt/exemplar/初始化/增强和推理策略；旧标注实验不可直接混为相同协议。
+
+后续权重选择建议（仅提案，未实施）：保留群体最佳、个体最佳和一个预先约定规则的联合选择checkpoint；联合规则使用两个val MAE各除以固定、相同数据协议的预先指定共享检测baseline的val MAE后等权平均，分母在候选方法比较前固定，并设正epsilon处理零值。此分数仅用于选择同一个模型权重，不作为合并计数性能汇报；不接受加权规则时保留Pareto候选，由用户确定取舍，不能声称存在唯一双任务最优。两个RMSE单独报告，可作预定平局规则，不把四项随意加权。不使用test选择规则或权重。
+
+关系评估建议（仅提案）：先按类型分别一对一匹配群体框和个体点，不使用预测关系参与节点匹配；框采用预先约定IoU阈值，点采用原图坐标下固定容差及敏感性报告。端到端边precision/recall/F1需计入节点漏检/误检导致的FN/FP；另报两端均匹配子集的关系指标和覆盖率、父群体含null准确率及独立个体precision/recall/F1。关系阈值/点容差仅按训练定义或val确定，固定后test；null不计为群体实体。完整成员集合准确率和成员数误差作为补充，不能由计数一致推断关系正确。
+
+本次没有新增训练或评估模型；BunchCount run ID、训练commit、服务器状态和性能均未知，以上清单数目来自本地实际标注审计，非模型实测性能。
